@@ -39,6 +39,16 @@
 
     <!-- Desktop: Full Grid -->
     <div class="grid-container" :class="{ 'mobile-view': isMobile }">
+      <div class="grid-toolbar">
+        <div class="filter-group">
+          <label>Filter by tag:</label>
+          <select v-model="activeTag">
+            <option value="">All</option>
+            <option v-for="tag in allTags" :key="tag" :value="tag">{{ tag }}</option>
+          </select>
+        </div>
+        <button class="export-btn" @click="exportCsv">Export CSV</button>
+      </div>
       <!-- Service year indicator for desktop -->
       <div v-if="!isMobile && BUCKETS.length > 5" class="scroll-hint">
         <span>2025 Service Year</span>
@@ -197,7 +207,7 @@ export default {
     ContactDrawer
   },
   setup() {
-    const { contacts, BUCKETS, addContact, updateContact, deleteContact } = useContacts()
+    const { contacts, BUCKETS, addContact, updateContact, deleteContact, MINISTRY_TAGS } = useContacts()
     
     // Responsive state
     const isMobile = ref(false)
@@ -235,10 +245,15 @@ export default {
       return contacts.value.filter(contact => contact.bucket === selectedBucket.value)
     })
 
+    // Tag filter
+    const activeTag = ref('')
+    const allTags = computed(() => MINISTRY_TAGS)
+
     // Get contacts for a specific bucket
     const getBucketContacts = (bucket) => {
       return contacts.value
         .filter(contact => contact.bucket === bucket)
+        .filter(contact => !activeTag.value || (contact.tags || '') === activeTag.value)
         .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
     }
 
@@ -551,6 +566,33 @@ export default {
       }
     }
 
+    // CSV export
+    const escapeCsv = (value) => {
+      if (value == null) return ''
+      const str = String(value)
+      if (/[",\n]/.test(str)) {
+        return '"' + str.replace(/"/g, '""') + '"'
+      }
+      return str
+    }
+
+    const exportCsv = () => {
+      const headers = ['name','phone','bucket','next_visit_at','hostel_name','location_detail','last_outcome','notes','tags']
+      const rows = contacts.value
+        .filter(c => !activeTag.value || (c.tags || '') === activeTag.value)
+        .map(c => headers.map(h => escapeCsv(c[h])))
+      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `rv-contacts-export-${new Date().toISOString().slice(0,10)}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    }
+
     // Lifecycle
     onMounted(() => {
       checkMobile()
@@ -841,7 +883,11 @@ export default {
         getHostelStyle,
         
         // Day badge colors
-        getDayBadgeStyle
+        getDayBadgeStyle,
+        // tag filter & export
+        activeTag,
+        allTags,
+        exportCsv
       }
   }
 }
@@ -1006,6 +1052,35 @@ export default {
 .grid-container {
   flex: 1;
   overflow: auto;
+}
+
+.grid-toolbar {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+}
+
+.filter-group label {
+  margin-right: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--text-color);
+}
+
+.filter-group select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+}
+
+.export-btn {
+  margin-left: auto;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--primary-color);
+  background: var(--primary-color);
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
 }
 
 .bucket-columns {
