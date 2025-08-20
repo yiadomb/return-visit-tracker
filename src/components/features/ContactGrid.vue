@@ -88,21 +88,73 @@
               
               <div 
                 class="contact-cell"
-                draggable="true"
+                :draggable="!isAnyEditing && true"
                 @dragstart="handleDragStart($event, contact)"
                 @dragend="handleDragEnd"
-                @click="openContactDrawer(contact)"
               >
-                <div class="contact-name">{{ contact.name }}</div>
-                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
-                  {{ contact.hostel_name || 'No hostel' }}
+                <!-- Name -->
+                <div class="contact-name" @dblclick.stop="startEdit(contact, 'name')">
+                  <template v-if="isEditing(contact, 'name')">
+                    <input
+                      class="inline-input"
+                      v-model="editBuffer"
+                      autofocus
+                      @keyup.enter="commitEdit(contact, 'name')"
+                      @keyup.esc="cancelEdit"
+                      @blur="commitEdit(contact, 'name')"
+                    />
+                  </template>
+                  <template v-else>
+                    {{ contact.name }}
+                  </template>
                 </div>
-                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes">
-                  <span class="contact-date" v-if="contact.next_visit_at">
-                    {{ formatDate(contact.next_visit_at) }}
+                
+                <!-- Hostel -->
+                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)" @dblclick.stop="startEdit(contact, 'hostel_name')">
+                  <template v-if="isEditing(contact, 'hostel_name')">
+                    <input
+                      class="inline-input"
+                      v-model="editBuffer"
+                      autofocus
+                      @keyup.enter="commitEdit(contact, 'hostel_name')"
+                      @keyup.esc="cancelEdit"
+                      @blur="commitEdit(contact, 'hostel_name')"
+                    />
+                  </template>
+                  <template v-else>
+                    {{ contact.hostel_name || 'No hostel' }}
+                  </template>
+                </div>
+
+                <!-- Date & Notes -->
+                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes || isEditing(contact, 'next_visit_at') || isEditing(contact, 'notes')">
+                  <!-- Date -->
+                  <span class="contact-date" @dblclick.stop="startEdit(contact, 'next_visit_at')">
+                    <template v-if="isEditing(contact, 'next_visit_at')">
+                      <input type="date" class="inline-input date" v-model="editBufferDate" />
+                      <input type="time" class="inline-input time" v-model="editBufferTime" />
+                      <button class="inline-save" @click.stop="commitEdit(contact, 'next_visit_at')">Save</button>
+                    </template>
+                    <template v-else>
+                      <span v-if="contact.next_visit_at">{{ formatDate(contact.next_visit_at) }}</span>
+                    </template>
                   </span>
-                  <span class="contact-notes" v-if="contact.notes">
-                    {{ contact.notes }}
+
+                  <!-- Notes -->
+                  <span class="contact-notes" @dblclick.stop="startEdit(contact, 'notes')">
+                    <template v-if="isEditing(contact, 'notes')">
+                      <input
+                        class="inline-input"
+                        v-model="editBuffer"
+                        autofocus
+                        @keyup.enter="commitEdit(contact, 'notes')"
+                        @keyup.esc="cancelEdit"
+                        @blur="commitEdit(contact, 'notes')"
+                      />
+                    </template>
+                    <template v-else>
+                      <span v-if="contact.notes">{{ contact.notes }}</span>
+                    </template>
                   </span>
                 </div>
               </div>
@@ -154,18 +206,63 @@
                 v-for="contact in getBucketContacts(bucket)" 
                 :key="contact.id"
                 class="contact-cell mobile"
-                @click="openContactDrawer(contact)"
               >
-                <div class="contact-name">{{ contact.name }}</div>
-                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
-                  {{ contact.hostel_name || 'No hostel' }}
+                <!-- Mobile inline edits (tap to edit) -->
+                <div class="contact-name" @click.stop="startEdit(contact, 'name')">
+                  <template v-if="isEditing(contact, 'name')">
+                    <input
+                      class="inline-input"
+                      v-model="editBuffer"
+                      autofocus
+                      @keyup.enter="commitEdit(contact, 'name')"
+                      @keyup.esc="cancelEdit"
+                      @blur="commitEdit(contact, 'name')"
+                    />
+                  </template>
+                  <template v-else>
+                    {{ contact.name }}
+                  </template>
                 </div>
-                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes">
-                  <span class="contact-date" v-if="contact.next_visit_at">
-                    {{ formatDate(contact.next_visit_at) }}
+                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)" @click.stop="startEdit(contact, 'hostel_name')">
+                  <template v-if="isEditing(contact, 'hostel_name')">
+                    <input
+                      class="inline-input"
+                      v-model="editBuffer"
+                      autofocus
+                      @keyup.enter="commitEdit(contact, 'hostel_name')"
+                      @keyup.esc="cancelEdit"
+                      @blur="commitEdit(contact, 'hostel_name')"
+                    />
+                  </template>
+                  <template v-else>
+                    {{ contact.hostel_name || 'No hostel' }}
+                  </template>
+                </div>
+                <div class="contact-date-notes mobile">
+                  <span class="contact-date" @click.stop="startEdit(contact, 'next_visit_at')">
+                    <template v-if="isEditing(contact, 'next_visit_at')">
+                      <input type="date" class="inline-input date" v-model="editBufferDate" />
+                      <input type="time" class="inline-input time" v-model="editBufferTime" />
+                      <button class="inline-save" @click.stop="commitEdit(contact, 'next_visit_at')">Save</button>
+                    </template>
+                    <template v-else>
+                      <span v-if="contact.next_visit_at">{{ formatDate(contact.next_visit_at) }}</span>
+                    </template>
                   </span>
-                  <span class="contact-notes" v-if="contact.notes">
-                    {{ contact.notes }}
+                  <span class="contact-notes mobile" @click.stop="startEdit(contact, 'notes')">
+                    <template v-if="isEditing(contact, 'notes')">
+                      <input
+                        class="inline-input"
+                        v-model="editBuffer"
+                        autofocus
+                        @keyup.enter="commitEdit(contact, 'notes')"
+                        @keyup.esc="cancelEdit"
+                        @blur="commitEdit(contact, 'notes')"
+                      />
+                    </template>
+                    <template v-else>
+                      <span v-if="contact.notes">{{ contact.notes }}</span>
+                    </template>
                   </span>
                 </div>
               </div>
@@ -228,6 +325,60 @@ export default {
     const selectedContact = ref(null)
     const isEditing = ref(false)
     const saving = ref(false)
+
+    // Inline edit state
+    const editingContactId = ref(null)
+    const editingField = ref('')
+    const editBuffer = ref('')
+    const editBufferDate = ref('')
+    const editBufferTime = ref('')
+    const isAnyEditing = computed(() => !!editingContactId.value)
+
+    const isEditing = (contact, field) => editingContactId.value === contact.id && editingField.value === field
+
+    const startEdit = (contact, field) => {
+      editingContactId.value = contact.id
+      editingField.value = field
+      if (field === 'next_visit_at') {
+        if (contact.next_visit_at) {
+          const d = new Date(contact.next_visit_at)
+          editBufferDate.value = d.toISOString().split('T')[0]
+          editBufferTime.value = d.toTimeString().slice(0,5)
+        } else {
+          editBufferDate.value = ''
+          editBufferTime.value = ''
+        }
+      } else {
+        editBuffer.value = contact[field] || ''
+      }
+    }
+
+    const cancelEdit = () => {
+      editingContactId.value = null
+      editingField.value = ''
+      editBuffer.value = ''
+      editBufferDate.value = ''
+      editBufferTime.value = ''
+    }
+
+    const commitEdit = async (contact, field) => {
+      try {
+        const changes = {}
+        if (field === 'next_visit_at') {
+          if (editBufferDate.value) {
+            const t = editBufferTime.value || '10:00'
+            changes.next_visit_at = `${editBufferDate.value}T${t}`
+          } else {
+            changes.next_visit_at = ''
+          }
+        } else {
+          changes[field] = editBuffer.value
+        }
+        await updateContact(contact.id, changes)
+      } finally {
+        cancelEdit()
+      }
+    }
 
     // Drag and drop state
     const draggedContact = ref(null)
@@ -884,6 +1035,15 @@ export default {
         
         // Day badge colors
         getDayBadgeStyle,
+        // inline editing
+        isAnyEditing,
+        isEditing,
+        startEdit,
+        cancelEdit,
+        commitEdit,
+        editBuffer,
+        editBufferDate,
+        editBufferTime,
         // tag filter & export
         activeTag,
         allTags,
@@ -1163,6 +1323,26 @@ export default {
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+.inline-input {
+  width: 100%;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+.inline-input.date { width: 8.5rem; }
+.inline-input.time { width: 6rem; margin-left: 0.35rem; }
+.inline-save {
+  margin-left: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--primary-color);
+  background: var(--primary-color);
+  color: #fff;
+  border-radius: 3px;
+  font-size: 0.75rem;
 }
 
 .contact-cell:hover {
