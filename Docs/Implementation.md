@@ -71,6 +71,13 @@ The project will be built in logical stages, ensuring a solid foundation and ite
 - [x] Implement the logic to schedule daily local notifications and visit reminders.
 
 ### Stage 3: Advanced Features
+- [ ] Service report (monthly hours & Bible studies)
+  - Log ministry sessions (date, duration, optional notes)
+  - Auto-calculate monthly totals: hours, number of Bible studies
+  - Month selector with per-month summary view
+  - Quick-add timer for live session tracking (optional)
+  - Export monthly report (CSV; PDF when PDF export is added)
+  - Optional end-of-month reminder to review/complete report
 - [ ] Set up a new project on Supabase.
 - [ ] Implement the Google OAuth flow to allow users to sign in and grant Google Drive permissions.
 - [ ] Create a Supabase Edge Function to handle interactions with the Google Drive API securely.

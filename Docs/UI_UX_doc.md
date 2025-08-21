@@ -21,6 +21,7 @@ This document specifies the core design system, user experience flows, and respo
 - **Tablet & Desktop (Landscape):**
     - The full, multi-column grid is displayed, with each bucket as a separate column.
     - The layout should be scrollable both horizontally and vertically.
+    - Post‑MVP: a monthly Service Report view with a month picker and summary cards (Hours, Studies), plus a session log list.
 
 ---
 
