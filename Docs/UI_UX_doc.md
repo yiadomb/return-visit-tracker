@@ -27,15 +27,17 @@ This document specifies the core design system, user experience flows, and respo
 ## 3. Component Design
 
 - **Grid Cell:**
-    - **Default State:** Shows only the contact's `Name` and `Hostel`.
-    - **Interaction:** A single tap on a cell opens its corresponding drawer.
+    - **Default State:** Shows the contact's `Name`, `Hostel`, and date/notes when present.
+    - **Interaction:**
+        - Mobile: tap a field to edit inline; drawer remains available for full edit.
+        - Desktop: double‑click a field to edit inline; Esc cancels, Enter saves.
 - **Contact Drawer:**
     - **Content:** Displays the contact's phone number, last outcome, notes, and tags.
     - **Actions:** Contains one-tap buttons for "Call" (`tel:` link) and "Message" (e.g., WhatsApp `https://wa.me/` link).
 - **Location Drawer:**
     - **Content:** Provides a free-text area for detailed location information (floor, room, town, etc.).
 - **Context-Aware Inputs:**
-    - **Dates (`next_visit_at`):** Use a native HTML date picker for ease of use on mobile.
+    - **Dates (`next_visit_at`):** Inline date and time inputs (native) with quick save; fallback to drawer.
     - **Tags (`last_outcome`):** Use a dropdown or tag selector populated with the predefined list.
 
 ---
@@ -48,10 +50,8 @@ This document specifies the core design system, user experience flows, and respo
     - `--primary-color` (for accents, buttons, links)
     - `--cell-background-color`
     - `--header-background-color`
-- **Themes:**
-    - **Light:** Default theme with a light background and dark text.
-    - **Dark:** Dark background with light text for reduced eye strain.
-    - **Custom:** Allow for future color palettes to be added easily.
+- **Themes:** (planned)
+    - **Light/Dark toggle and custom palettes** using CSS variables.
 - **Typography:** Choose a clean, legible font (like Inter or system UI fonts) that works well at small sizes.
 
 ---

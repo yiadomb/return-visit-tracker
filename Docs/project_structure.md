@@ -10,7 +10,8 @@ This document outlines the standard folder and file architecture for the Return-
 │   ├── UI_UX_doc.md           # Design system and UX flows
 │   └── Bug_tracking.md        # Log for tracking bugs and resolutions
 ├── public/
-│   └── favicon.ico            # App icon
+│   ├── favicon.ico            # App icon
+│   └── sw.js                  # Service worker for offline caching
 ├── src/
 │   ├── assets/                # Static assets like images, fonts, and global styles
 │   │   └── styles/
@@ -18,13 +19,14 @@ This document outlines the standard folder and file architecture for the Return-
 │   ├── components/            # Reusable Vue components
 │   │   ├── core/              # Basic building blocks (e.g., Button, Input, Modal)
 │   │   ├── layout/            # Structural components (e.g., Header, GridContainer)
-│   │   └── features/          # Components related to specific features (e.g., ContactDrawer, AgendaList)
+│   │   └── features/          # Components for features (ContactGrid, ContactDrawer, etc.)
 │   ├── composables/           # Reusable Vue 3 Composition API functions
-│   │   ├── useDb.js           # Logic for interacting with the Dexie database
-│   │   └── useNotifications.js# Logic for handling local notifications
+│   │   ├── useDb.js           # Dexie interaction + BUCKETS/tags/outcomes
+│   │   └── useNotifications.js# Local & web notifications
 │   ├── services/
-│   │   ├── db.js              # Dexie instance, schema definition, and middleware
-│   │   └── cloudSync.js       # Logic for Supabase and Google Drive backup
+│   │   ├── db.js              # Dexie instance, schema & services (contacts, backup)
+│   │   ├── notificationService.js # Scheduling daily/visit notifications
+│   │   └── reminders.js       # Reminder options
 │   ├── stores/                # State management (e.g., Pinia)
 │   │   └── contacts.js        # State for contacts, filters, etc.
 │   ├── views/                 # Page-level components tied to routes

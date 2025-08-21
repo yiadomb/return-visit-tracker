@@ -59,15 +59,16 @@ The project will be built in logical stages, ensuring a solid foundation and ite
 - [x] Integrate Capacitor into the project to establish the PWA shell.
 
 ### Stage 2: Core Features (MVP)
-- [x] Install and configure TanStack Table for Vue.
+- [x] Install and configure TanStack Table for Vue. (Note: custom grid used; TanStack reserved for future)
 - [x] Develop the main `Grid` view component.
 - [x] Connect the `Grid` component to Dexie to display contacts in their respective "day-buckets".
 - [x] Implement the `Add/Edit Contact` drawer/modal component with a form.
 - [x] Enable tap-to-edit functionality on grid cells, opening the drawer with the correct contact data.
+- [x] Implement inline cell editing for name, hostel, date and notes (drawer still available for full edit).
 - [x] Implement the logic to create, update, and delete contacts in the Dexie database via the UI.
-- [ ] Set up the Capacitor Local Notifications plugin.
-- [ ] Create a simple `Agenda` view to list today's scheduled visits.
-- [ ] Implement the logic to schedule daily local notifications for the user.
+- [x] Set up the Capacitor Local Notifications plugin (with web fallback) and scheduling.
+- [x] Create a simple `Agenda` view to list today's scheduled visits.
+- [x] Implement the logic to schedule daily local notifications and visit reminders.
 
 ### Stage 3: Advanced Features
 - [ ] Set up a new project on Supabase.
@@ -78,10 +79,32 @@ The project will be built in logical stages, ensuring a solid foundation and ite
 - [ ] Install `pdfmake` and implement the "Export to PDF" feature.
 - [ ] Develop the context-sensitive drawers for `Contact` and `Hostel` cells.
 - [ ] Implement the UI and logic for filtering contacts by tags.
+  
+  Status: Tag filter implemented; sorting to be added later.
 
 ### Stage 4: Polish & Optimization
 - [ ] Implement the UI theming system (Light, Dark, and custom themes) using CSS variables.
 - [ ] Conduct thorough responsive design testing and apply fixes for a polished mobile and tablet experience.
-- [ ] Analyze grid performance and apply optimizations like virtualization.
+- [ ] Analyze grid performance and apply optimizations like virtualization.  
+  Note: Virtualization is planned to keep large buckets smooth; not required for current data sizes.
 - [ ] Review the entire application for performance bottlenecks and UX improvements.
 - [ ] Final user-acceptance testing (UAT) and bug squashing. 
+
+---
+
+## Current MVP Status (Completed in v1)
+
+- Offline-first PWA with improved service worker (navigation fallback and asset caching)
+- Main contact grid with drag & drop across day buckets and natural reordering within buckets
+- Inline editing for core fields (name, hostel, date, notes) + drawer for full edit
+- Tag filter + CSV export from the grid toolbar
+- Agenda view with today’s visits, quick call/WhatsApp actions
+- Local notifications service (daily reminder + upcoming visit reminders) with native (Capacitor) and web fallback
+- Android builds: debug APK and signed release APK produced; AAB planned if store publishing is needed
+
+## Upcoming (Post‑MVP)
+
+- Virtualized lists for very large buckets (planned)
+- Sorting and multi-tag filtering options
+- PDF export and optional Google Sheets/Drive backup (requires auth setup)
+- Theme switcher and an accessibility pass
