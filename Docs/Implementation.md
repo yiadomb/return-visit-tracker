@@ -120,3 +120,12 @@ The project will be built in logical stages, ensuring a solid foundation and ite
 - Sorting and multi-tag filtering options
 - PDF export and optional Google Sheets/Drive backup (requires auth setup)
 - Theme switcher and an accessibility pass
+
+### Virtualization (deferred)
+- What: Render only visible items instead of the full bucket. We’ll virtualize each bucket column independently so scrolling stays smooth even with hundreds of contacts.
+- When to enable: if any bucket regularly exceeds ~150–250 contacts, or total on‑screen contacts exceed ~800, or you notice scroll jank/battery drain.
+- Notes: keep item heights consistent; keep drag‑and‑drop within a bucket; cross‑day moves still work via drag to the bucket header or via the drawer.
+
+### Cloud Sync status
+- Current: single‑project open access (no login). Any device running this app with the project’s anon key will sync to the same dataset.
+- Coming (optional): add Supabase Auth (email sign‑in) + RLS policies to scope rows per user. Then each user’s contacts sync across their devices after login.
