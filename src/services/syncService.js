@@ -51,25 +51,37 @@ export const syncService = {
     return isSupabaseConfigured
   },
 
+  async getUserId() {
+    try {
+      const { data } = await supabase.auth.getUser()
+      return data?.user?.id || null
+    } catch {
+      return null
+    }
+  },
+
   init() {
     if (!isSupabaseConfigured || this._isInitialized) return
     this._isInitialized = true
 
     // Subscribe to Postgres changes if Realtime is enabled
     try {
-      this._channel = supabase
-        .channel('contacts_changes')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: TABLE },
-          async () => {
-            clearTimeout(this._debouncedPull)
-            this._debouncedPull = setTimeout(() => {
-              this.pullAll().catch(() => {})
-            }, 300)
-          }
-        )
-        .subscribe()
+      // Scope realtime to the current user if available
+      this.getUserId().then((uid) => {
+        this._channel = supabase
+          .channel('contacts_changes')
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: TABLE, filter: uid ? `user_id=eq.${uid}` : undefined },
+            async () => {
+              clearTimeout(this._debouncedPull)
+              this._debouncedPull = setTimeout(() => {
+                this.pullAll().catch(() => {})
+              }, 300)
+            }
+          )
+          .subscribe()
+      })
 
       // Broadcast channel as a secondary nudge (does not need DB realtime config)
       this._notifyChannel = supabase
@@ -120,6 +132,8 @@ export const syncService = {
     if (!isSupabaseConfigured) return { pushed: 0 }
     // Collapse local duplicates before pushing
     await this._dedupeLocals()
+    const userId = await this.getUserId()
+    if (!userId) return { pushed: 0 }
     const locals = await db.contacts.toArray()
     if (locals.length === 0) return { pushed: 0 }
 
@@ -136,7 +150,7 @@ export const syncService = {
       })
     )
 
-    const payload = withUuid.map(toRemote)
+    const payload = withUuid.map((c) => ({ ...toRemote(c), user_id: userId }))
     const { data, error } = await supabase.from(TABLE).upsert(payload, { onConflict: 'remote_uuid' }).select()
     if (error) throw error
 
@@ -159,7 +173,9 @@ export const syncService = {
 
   async pullAll() {
     if (!isSupabaseConfigured) return { pulled: 0 }
-    const { data, error } = await supabase.from(TABLE).select('*')
+    const userId = await this.getUserId()
+    if (!userId) return { pulled: 0 }
+    const { data, error } = await supabase.from(TABLE).select('*').eq('user_id', userId)
     if (error) throw error
     if (!data) return { pulled: 0 }
 
