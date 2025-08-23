@@ -9,6 +9,9 @@
         <router-link to="/agenda" class="nav-link" :class="{ active: $route.name === 'Agenda' }">
           📅 Today's Agenda
         </router-link>
+        <router-link to="/settings" class="nav-link" :class="{ active: $route.name === 'Settings' }">
+          ⚙️ Settings
+        </router-link>
       </nav>
     </header>
     
