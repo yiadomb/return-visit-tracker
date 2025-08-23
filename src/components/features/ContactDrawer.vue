@@ -2,36 +2,39 @@
   <div class="drawer-overlay" @click="handleOverlayClick">
     <div class="drawer-content" @click.stop>
       <div class="drawer-header">
-        <h3>{{ isEditing ? 'Edit Contact' : 'Add Contact' }}</h3>
+        <h3>{{ title }}</h3>
         <button class="close-btn" @click="$emit('close')" aria-label="Close">
           ×
         </button>
       </div>
       
       <form @submit.prevent="handleSubmit" class="contact-form">
-        <!-- Name -->
+        <!-- Name (optional) -->
         <div class="form-group">
-          <label for="name">Name *</label>
+          <label for="name">Name (of householder)</label>
           <input
             id="name"
             v-model="formData.name"
             type="text"
-            placeholder="Enter contact name"
-            required
+            placeholder="Enter Name Here"
             autocomplete="off"
             :class="{ 'error': errors.name }"
+            :readonly="mode === 'view'"
+            :disabled="mode === 'view'"
           />
           <span v-if="errors.name" class="error-text">{{ errors.name }}</span>
         </div>
 
-        <!-- Hostel Name -->
+        <!-- Location -->
         <div class="form-group">
-          <label for="hostel_name">Hostel/Location</label>
+          <label for="hostel_name">Location (Hostel name)</label>
           <input
             id="hostel_name"
             v-model="formData.hostel_name"
             type="text"
             placeholder="Garden View Hostel"
+            :readonly="mode === 'view'"
+            :disabled="mode === 'view'"
           />
         </div>
 
@@ -42,7 +45,9 @@
             id="location_detail"
             v-model="formData.location_detail"
             type="text"
-            placeholder="Floor 3, Room 15, Near main gate"
+            placeholder="1st Floor, Room 7"
+            :readonly="mode === 'view'"
+            :disabled="mode === 'view'"
           />
         </div>
 
@@ -52,8 +57,10 @@
           <textarea
             id="notes"
             v-model="formData.notes"
-            placeholder="Any additional notes..."
+            placeholder="Any additional note..."
             rows="3"
+            :readonly="mode === 'view'"
+            :disabled="mode === 'view'"
           ></textarea>
         </div>
 
@@ -67,27 +74,35 @@
             id="phone"
             v-model="formData.phone"
             type="tel"
-            placeholder="1234567890"
+            placeholder="0244444444"
             pattern="[0-9]{10}"
             autocomplete="off"
             :class="{ 'error': errors.phone }"
+            :readonly="mode === 'view'"
+            :disabled="mode === 'view'"
           />
           <span v-if="errors.phone" class="error-text">{{ errors.phone }}</span>
         </div>
 
-        <!-- Bucket -->
+        <!-- Bucket (custom small dropdown) -->
         <div class="form-group">
-          <label for="bucket">Day *</label>
-          <select id="bucket" v-model="formData.bucket" required>
-            <option v-for="bucket in BUCKETS" :key="bucket" :value="bucket">
+          <label>Day *</label>
+          <div class="mini-select" ref="bucketSelectRef">
+            <button type="button" class="mini-trigger" @click="showBucketMenu = !showBucketMenu">
+              {{ formData.bucket || 'Select day' }}
+              <span class="caret">▾</span>
+            </button>
+            <div v-if="showBucketMenu && mode !== 'view'" class="mini-menu" @click.stop>
+              <button v-for="bucket in BUCKETS" :key="bucket" class="mini-option" @click="chooseBucket(bucket)">
               {{ bucket }}
-            </option>
-          </select>
+              </button>
+            </div>
+          </div>
         </div>
 
         <!-- Next Visit Date & Time -->
         <div class="form-group">
-          <label for="next_visit_at">Next Visit Date</label>
+          <label for="next_visit_at">Next Visit</label>
           <div class="datetime-inputs">
             <input
               id="next_visit_at"
@@ -95,54 +110,63 @@
               type="date"
               :min="today"
               class="date-input"
+              :readonly="mode === 'view'"
+              :disabled="mode === 'view'"
             />
             <input
               id="next_visit_time"
               v-model="formData.next_visit_time"
               type="time"
               class="time-input"
+              :readonly="mode === 'view'"
+              :disabled="mode === 'view'"
             />
           </div>
+          <label class="remind-toggle">
+            <input type="checkbox" v-model="remindMe" />
+            Remind me
+          </label>
         </div>
 
-        <!-- Reminders -->
+        <!-- Ministry Tag (custom small dropdown) -->
         <div class="form-group">
-          <label>Reminders</label>
-          <div class="reminder-checkboxes">
-            <label v-for="option in REMINDER_OPTIONS" :key="option.value">
-              <input
-                type="checkbox"
-                :value="option.value"
-                v-model="formData.reminders"
-              />
-              {{ option.label }}
-            </label>
+          <label>Ministry Context</label>
+          <div class="mini-select" ref="tagSelectRef">
+            <button type="button" class="mini-trigger" @click="showTagMenu = !showTagMenu">
+              {{ formData.tags || 'Select context...' }}
+              <span class="caret">▾</span>
+            </button>
+            <div v-if="showTagMenu && mode !== 'view'" class="mini-menu" @click.stop>
+              <button class="mini-option" @click="chooseTag('')">Select context...</button>
+              <button v-for="tag in MINISTRY_TAGS" :key="tag" class="mini-option" @click="chooseTag(tag)">
+                {{ tag }}
+              </button>
+            </div>
           </div>
-        </div>
-
-        <!-- Ministry Tag -->
-        <div class="form-group">
-          <label for="tags">Ministry Context</label>
-          <select id="tags" v-model="formData.tags">
-            <option value="">Select context...</option>
-            <option v-for="tag in MINISTRY_TAGS" :key="tag" :value="tag">
-              {{ tag }}
-            </option>
-          </select>
         </div>
 
         <!-- Action Buttons -->
         <div class="form-actions">
-          <button type="button" @click="$emit('close')" class="btn-secondary">
-            Cancel
-          </button>
-          <button type="submit" class="btn-primary" :disabled="loading">
-            {{ loading ? 'Saving...' : (isEditing ? 'Update' : 'Add') }} Contact
-          </button>
+          <template v-if="mode === 'view'">
+            <button type="button" @click="$emit('close')" class="btn-secondary">
+              Close
+            </button>
+            <button type="button" class="btn-primary" @click="$emit('toggle-edit')">
+              Edit
+            </button>
+          </template>
+          <template v-else>
+            <button type="button" @click="$emit('close')" class="btn-secondary">
+              Cancel
+            </button>
+            <button type="submit" class="btn-primary" :disabled="loading">
+              {{ loading ? 'Saving...' : (isEditing ? 'Update' : 'Add') }} Contact
+            </button>
+          </template>
         </div>
 
         <!-- Quick Actions (for editing only) -->
-        <div v-if="isEditing" class="quick-actions">
+        <div v-if="mode !== 'add'" class="quick-actions">
           <h4>Quick Actions</h4>
           <div class="action-buttons">
             <a 
@@ -178,7 +202,6 @@
 <script>
 import { ref, reactive, computed, watch } from 'vue'
 import { BUCKETS, MINISTRY_TAGS } from '../../services/db.js'
-import { REMINDER_OPTIONS } from '../../services/reminders.js'
 
 export default {
   name: 'ContactDrawer',
@@ -198,6 +221,16 @@ export default {
   },
   emits: ['close', 'save', 'delete'],
   setup(props, { emit }) {
+    const mode = computed(() => {
+      if (props.isEditing) return 'edit'
+      return props.contact && props.contact.id ? 'view' : 'add'
+    })
+    const title = computed(() => {
+      if (mode.value === 'view') return 'Contact'
+      if (mode.value === 'edit') return 'Edit Contact'
+      return 'Add Contact'
+    })
+
     const formData = reactive({
       name: '',
       phone: '',
@@ -210,6 +243,21 @@ export default {
       notes: '',
       reminders: ['-30']
     })
+    const remindMe = ref(true)
+    const showBucketMenu = ref(false)
+    const showTagMenu = ref(false)
+    const bucketSelectRef = ref(null)
+    const tagSelectRef = ref(null)
+
+    const chooseBucket = (bucket) => {
+      formData.bucket = bucket
+      showBucketMenu.value = false
+    }
+
+    const chooseTag = (tag) => {
+      formData.tags = tag
+      showTagMenu.value = false
+    }
 
     const errors = ref({})
 
@@ -241,8 +289,12 @@ export default {
         }
         if (newContact.reminders) {
           formData.reminders = [...newContact.reminders]
+          remindMe.value = formData.reminders.length > 0
         } else if (newContact.reminder_offset !== undefined) {
           formData.reminders = [String(newContact.reminder_offset)]
+          remindMe.value = true
+        } else {
+          remindMe.value = true
         }
       } else {
         // Reset form for new contact
@@ -255,6 +307,7 @@ export default {
             formData[key] = ''
           }
         })
+        remindMe.value = true
       }
       errors.value = {}
     }, { immediate: true })
@@ -262,10 +315,6 @@ export default {
     // Validation
     const validateForm = () => {
       errors.value = {}
-
-      if (!formData.name.trim()) {
-        errors.value.name = 'Name is required'
-      }
 
       if (formData.phone && !formData.phone.match(/^\d{10}$/)) {
         errors.value.phone = 'Phone must be 10 digits'
@@ -301,10 +350,8 @@ export default {
       delete contactData.next_visit_date
       delete contactData.next_visit_time
 
-      // Ensure reminders array exists
-      if (!Array.isArray(contactData.reminders) || contactData.reminders.length === 0) {
-        contactData.reminders = ['-30']
-      }
+      // Map toggle to default reminder: 1 hour before the selected time
+      contactData.reminders = remindMe.value ? ['-60'] : []
 
       emit('save', contactData)
     }
@@ -315,12 +362,20 @@ export default {
     }
 
           return {
+        mode,
+        title,
         formData,
         errors,
         today,
         BUCKETS,
         MINISTRY_TAGS,
-        REMINDER_OPTIONS,
+        remindMe,
+        showBucketMenu,
+        showTagMenu,
+        chooseBucket,
+        chooseTag,
+        bucketSelectRef,
+        tagSelectRef,
         validateForm,
         handleSubmit,
         handleOverlayClick
@@ -348,8 +403,8 @@ export default {
   background-color: var(--background-color);
   border-radius: 8px;
   width: 100%;
-  max-width: 500px;
-  max-height: 90vh;
+  max-width: 440px;
+  max-height: 88vh;
   overflow: auto;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
 }
@@ -358,7 +413,7 @@ export default {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 1.5rem 1.5rem 1rem 1.5rem;
+  padding: 1.1rem 1.1rem 0.85rem 1.1rem;
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -382,13 +437,9 @@ export default {
   color: var(--text-color);
 }
 
-.contact-form {
-  padding: 1.5rem;
-}
+.contact-form { padding: 1rem 1.1rem; }
 
-.form-group {
-  margin-bottom: 1rem;
-}
+.form-group { margin-bottom: 0.75rem; }
 
 .form-divider {
   border-top: 1px solid var(--border-color);
@@ -413,20 +464,27 @@ export default {
   margin-bottom: 0.5rem;
   font-weight: 600;
   color: var(--text-color);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
 }
 
 .form-group input,
 .form-group select,
 .form-group textarea {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.6rem 0.65rem;
   border: 1px solid var(--border-color);
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   background-color: var(--cell-background-color);
   color: var(--text-color);
   transition: border-color 0.2s ease;
+}
+
+.compact-select {
+  font-size: 0.8rem;
+  padding: 0.4rem 0.5rem;
+  max-height: 200px;
+  line-height: 1.1;
 }
 
 .form-group input:focus,
@@ -450,10 +508,7 @@ export default {
   display: block;
 }
 
-.datetime-inputs {
-  display: flex;
-  gap: 0.5rem;
-}
+.datetime-inputs { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
 .date-input {
   flex: 2;
@@ -466,16 +521,16 @@ export default {
 .form-actions {
   display: flex;
   gap: 1rem;
-  margin-top: 2rem;
-  padding-top: 1rem;
+  margin-top: 1.25rem;
+  padding-top: 0.75rem;
   border-top: 1px solid var(--border-color);
 }
 
 .btn-primary, .btn-secondary {
   flex: 1;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.9rem;
   border-radius: 4px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.2s ease;
 }
@@ -556,26 +611,46 @@ export default {
   transform: translateY(-1px);
 }
 
-.reminder-checkboxes {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-}
+.remind-toggle { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+.remind-toggle input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--primary-color); }
 
-.reminder-checkboxes label {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.9rem;
+/* Ultra-compact custom select for mobile */
+.mini-select { position: relative; width: 100%; }
+.mini-trigger {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--cell-background-color);
+  color: var(--text-color);
+  text-align: left;
+  font-size: 0.85rem;
+}
+.mini-trigger .caret { float: right; }
+.mini-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  background: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+  z-index: 2000;
+  max-height: 45vh;
+  overflow: auto;
+}
+.mini-option {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 0.85rem;
   color: var(--text-color);
 }
-
-.reminder-checkboxes input[type="checkbox"] {
-  width: 1rem;
-  height: 1rem;
-  accent-color: var(--primary-color);
-}
+.mini-option:hover { background: var(--cell-background-color); }
 
 /* Mobile responsive */
 @media (max-width: 768px) {

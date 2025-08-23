@@ -32,6 +32,7 @@
 <script>
 import { useContacts } from '../composables/useDb.js'
 import { notificationService } from '../services/notificationService.js'
+import { syncService } from '../services/syncService.js'
 import ContactGrid from '../components/features/ContactGrid.vue'
 import ContactDrawer from '../components/features/ContactDrawer.vue'
 import { onMounted, ref } from 'vue'
@@ -96,6 +97,19 @@ export default {
         console.log('Notification service initialized:', notificationService.getStatus())
       } catch (error) {
         console.warn('Failed to initialize notifications:', error)
+      }
+
+      // Kick off initial cloud sync if configured
+      try {
+        if (syncService.isReady()) {
+          syncService.init()
+          const result = await syncService.syncAll()
+          console.log('Initial sync completed', result)
+        } else {
+          console.log('Supabase not configured; skipping sync')
+        }
+      } catch (e) {
+        console.warn('Initial sync failed', e)
       }
     })
     

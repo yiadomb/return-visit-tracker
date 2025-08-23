@@ -78,6 +78,11 @@ The project will be built in logical stages, ensuring a solid foundation and ite
   - Quick-add timer for live session tracking (optional)
   - Export monthly report (CSV; PDF when PDF export is added)
   - Optional end-of-month reminder to review/complete report
+- [ ] Settings (reporting, notifications, appearance)
+  - Reporting defaults: recipient (name + phone/email), message template, include-hours default
+  - Notifications: daily reminder time, month-end prompt toggle
+  - Appearance: light/dark theme toggle
+  - Data utilities: copy monthly report text to clipboard
 - [ ] Set up a new project on Supabase.
 - [ ] Implement the Google OAuth flow to allow users to sign in and grant Google Drive permissions.
 - [ ] Create a Supabase Edge Function to handle interactions with the Google Drive API securely.

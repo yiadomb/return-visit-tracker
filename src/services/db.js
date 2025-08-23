@@ -41,6 +41,16 @@ class ReturnVisitDatabase extends Dexie {
       }
     })
     
+    // Version 3: Add remote_uuid and updated_at fields for cloud sync
+    this.version(3).stores({
+      contacts: '++id, remote_uuid, name, phone, bucket, next_visit_at, hostel_name, location_detail, last_outcome, notes, tags, display_order, updated_at',
+      backupMeta: '++id, last_synced_at, remote_id'
+    }).upgrade(async tx => {
+      const contacts = await tx.table('contacts').toArray()
+      const updates = contacts.map(c => tx.table('contacts').update(c.id, { updated_at: c.updated_at || new Date().toISOString() }))
+      await Promise.all(updates)
+    })
+
     // Define the Contact table
     this.contacts = this.table('contacts')
     this.backupMeta = this.table('backupMeta')
@@ -76,7 +86,8 @@ export const contactService = {
         reminders: contact.reminders || ['-30'],
         display_order: nextDisplayOrder,
         created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        remote_uuid: contact.remote_uuid || null
       })
       return await db.contacts.get(id)
     } catch (error) {
@@ -195,8 +206,8 @@ export const BUCKETS = [
   'Thursday',
   'Friday',
   'Flexible',
-  'Others',
-  'NotAtHomes'
+  'NotAtHomes',
+  'Others'
 ]
 
 export const MINISTRY_TAGS = [
@@ -206,7 +217,7 @@ export const MINISTRY_TAGS = [
   'Street Witnessing',
   'Business Territory',
   'Informal Witnessing',
-  'LFFI Study'
+  'Studying Enjoy life'
 ]
 
 export const OUTCOMES = [

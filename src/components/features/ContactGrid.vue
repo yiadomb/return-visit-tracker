@@ -1,64 +1,78 @@
 <template>
   <div class="contact-grid">
-    <!-- Mobile: Carousel Navigation -->
-    <div class="mobile-carousel-nav" v-if="isMobile">
-      <button 
-        class="nav-arrow prev" 
-        @click="goToPrevDay"
-        :disabled="!canGoPrev"
-      >
-        ‹
-      </button>
-      
-      <div class="day-indicator">
-        <div class="indicator-dots">
-          <span 
-            v-for="(bucket, index) in BUCKETS" 
-            :key="bucket"
-            class="dot"
-            :class="{ 
-              'active': index >= carouselIndex && index < carouselIndex + 2,
-              'primary': index === carouselIndex
-            }"
-            @click="goToDay(index)"
-          ></span>
-        </div>
-        <div class="current-days">
-          {{ getVisibleBuckets().map(b => getShortDayName(b)).join(' • ') }}
-        </div>
-      </div>
-      
-      <button 
-        class="nav-arrow next" 
-        @click="goToNextDay"
-        :disabled="!canGoNext"
-      >
-        ›
-      </button>
-    </div>
-
     <!-- Desktop: Full Grid -->
     <div class="grid-container" :class="{ 'mobile-view': isMobile }">
       <div class="grid-toolbar">
-        <div class="filter-group">
-          <label>Filter by tag:</label>
-          <select v-model="activeTag">
-            <option value="">All</option>
-            <option v-for="tag in allTags" :key="tag" :value="tag">{{ tag }}</option>
-          </select>
+        <div class="search-wrap">
+          <input
+            ref="searchInputRef"
+            class="search-input"
+            type="search"
+            v-model="searchInput"
+            placeholder="search name or hostel"
+            @keydown.esc.prevent="clearSearch"
+          />
+          <span v-if="searchQuery" class="search-count">{{ matchCount }} matches</span>
         </div>
-        <button class="export-btn" @click="exportCsv">Export CSV</button>
+        <div class="toolbar-actions">
+          <div class="dropdown" @keydown.esc="showFilterMenu=false" ref="filterDropdownRef">
+            <button class="filter-btn" @click="toggleFilters">Filter</button>
+            <div v-if="showFilterMenu" class="filter-menu" @click.stop>
+              <div class="tag-checkboxes">
+                <label v-for="tag in allTags" :key="tag" class="tag-option">
+                  <input type="checkbox" :value="tag" v-model="selectedTags" />
+                  {{ tag }}
+                </label>
+              </div>
+              <div class="filter-actions">
+                <button class="apply-btn" @click="showFilterMenu=false">Done</button>
+                <button class="clear-btn" @click="clearTags">Clear</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Chips below toolbar so they never get squeezed out -->
+      <div class="chips-collapsible">
+        <button class="chips-toggle" @click="chipsExpanded = !chipsExpanded" :aria-expanded="chipsExpanded">
+          Days <span class="chev" :class="{ open: chipsExpanded }">▾</span>
+        </button>
+        <div v-show="chipsExpanded" class="mobile-day-chips toolbar-chips">
+          <div class="chips-row">
+      <button 
+              v-for="bucket in chipRow1"
+              :key="bucket"
+              class="chip"
+              :class="{ active: selectedBucket === bucket }"
+              @click="selectMobileDay(bucket)"
+            >
+              {{ getShortDayName(bucket) }}
+      </button>
+        </div>
+          <div class="chips-row">
+      <button 
+              v-for="bucket in chipRow2"
+              :key="bucket"
+              class="chip"
+              :class="{ active: selectedBucket === bucket }"
+              @click="selectMobileDay(bucket)"
+            >
+              {{ getSpecialLabel(bucket) }}
+      </button>
+    </div>
+        </div>
       </div>
       <!-- Service year indicator for desktop -->
       <div v-if="!isMobile && BUCKETS.length > 5" class="scroll-hint">
         <span>2025 Service Year</span>
       </div>
       
-      <div v-if="!isMobile" class="bucket-columns">
+      <div v-if="!isMobile" class="bucket-columns" ref="columnsContainer">
         <div 
           v-for="bucket in BUCKETS" 
           :key="bucket" 
           class="bucket-column"
+          :data-bucket="bucket"
           @drop="handleDrop($event, bucket)"
           @dragover.prevent="handleDragOver($event, bucket)"
           @dragenter.prevent="handleDragEnter($event, bucket)"
@@ -85,16 +99,22 @@
                 v-if="draggedContact && dragOverPosition === `${bucket}-${index}-top`"
                 class="insertion-line"
               ></div>
-              
+              <!-- Peek actions: show a small View button after single click -->
+              <div v-if="armedContactId === contact.id" class="peek-actions">
+                <button class="peek-btn" @click.stop="openContactDrawerView(contact)">View</button>
+              </div>
               <div 
                 class="contact-cell"
-                :draggable="!isAnyEditing && true"
+                :draggable="!isPhone && !isAnyCellEditing"
                 @dragstart="handleDragStart($event, contact)"
                 @dragend="handleDragEnd"
+                @click="armPreview(contact, $event)"
+                @contextmenu.prevent
+                :class="{ armed: armedContactId === contact.id }"
               >
                 <!-- Name -->
-                <div class="contact-name" @dblclick.stop="startEdit(contact, 'name')">
-                  <template v-if="isEditing(contact, 'name')">
+                <div class="contact-name">
+                  <template v-if="isCellEditing(contact, 'name')">
                     <input
                       class="inline-input"
                       v-model="editBuffer"
@@ -105,13 +125,16 @@
                     />
                   </template>
                   <template v-else>
-                    {{ contact.name }}
+                    <span v-html="highlight(contact.name)"></span>
                   </template>
                 </div>
-                
+                <!-- Peek actions: show a small View button after single tap -->
+                <div v-if="armedContactId === contact.id" class="peek-actions mobile">
+                  <button class="peek-btn" @click.stop="openContactDrawerView(contact)">View</button>
+                </div>
                 <!-- Hostel -->
-                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)" @dblclick.stop="startEdit(contact, 'hostel_name')">
-                  <template v-if="isEditing(contact, 'hostel_name')">
+                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
+                  <template v-if="isCellEditing(contact, 'hostel_name')">
                     <input
                       class="inline-input"
                       v-model="editBuffer"
@@ -122,15 +145,15 @@
                     />
                   </template>
                   <template v-else>
-                    {{ contact.hostel_name || 'No hostel' }}
+                    <span v-html="highlight(contact.hostel_name || 'No hostel')"></span>
                   </template>
                 </div>
 
                 <!-- Date & Notes -->
-                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes || isEditing(contact, 'next_visit_at') || isEditing(contact, 'notes')">
+                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes || isCellEditing(contact, 'next_visit_at') || isCellEditing(contact, 'notes')">
                   <!-- Date -->
-                  <span class="contact-date" @dblclick.stop="startEdit(contact, 'next_visit_at')">
-                    <template v-if="isEditing(contact, 'next_visit_at')">
+                  <span class="contact-date">
+                    <template v-if="isCellEditing(contact, 'next_visit_at')">
                       <input type="date" class="inline-input date" v-model="editBufferDate" />
                       <input type="time" class="inline-input time" v-model="editBufferTime" />
                       <button class="inline-save" @click.stop="commitEdit(contact, 'next_visit_at')">Save</button>
@@ -141,8 +164,8 @@
                   </span>
 
                   <!-- Notes -->
-                  <span class="contact-notes" @dblclick.stop="startEdit(contact, 'notes')">
-                    <template v-if="isEditing(contact, 'notes')">
+                  <span class="contact-notes">
+                    <template v-if="isCellEditing(contact, 'notes')">
                       <input
                         class="inline-input"
                         v-model="editBuffer"
@@ -158,6 +181,7 @@
                   </span>
                 </div>
               </div>
+              
               
               <!-- Insertion line (only visible when dragging) -->
               <div 
@@ -206,10 +230,18 @@
                 v-for="contact in getBucketContacts(bucket)" 
                 :key="contact.id"
                 class="contact-cell mobile"
+                :draggable="false"
+                @click="armPreview(contact, $event)"
+                @touchstart.passive="onTouchStartCell(contact, $event)"
+                @touchmove.passive="onTouchMoveCell($event)"
+                @touchend.passive="onTouchEndCell(contact, $event)"
+                @dblclick.stop="openContactDrawerView(contact)"
+                @contextmenu.prevent
+                :class="{ armed: armedContactId === contact.id }"
               >
-                <!-- Mobile inline edits (tap to edit) -->
-                <div class="contact-name" @click.stop="startEdit(contact, 'name')">
-                  <template v-if="isEditing(contact, 'name')">
+                <!-- Mobile: no single-tap edit; use long-press or drawer -->
+                <div class="contact-name">
+                  <template v-if="isCellEditing(contact, 'name')">
                     <input
                       class="inline-input"
                       v-model="editBuffer"
@@ -220,11 +252,11 @@
                     />
                   </template>
                   <template v-else>
-                    {{ contact.name }}
+                    <span v-html="highlight(contact.name)"></span>
                   </template>
                 </div>
-                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)" @click.stop="startEdit(contact, 'hostel_name')">
-                  <template v-if="isEditing(contact, 'hostel_name')">
+                <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
+                  <template v-if="isCellEditing(contact, 'hostel_name')">
                     <input
                       class="inline-input"
                       v-model="editBuffer"
@@ -235,12 +267,12 @@
                     />
                   </template>
                   <template v-else>
-                    {{ contact.hostel_name || 'No hostel' }}
+                    <span v-html="highlight(contact.hostel_name || 'No hostel')"></span>
                   </template>
                 </div>
                 <div class="contact-date-notes mobile">
-                  <span class="contact-date" @click.stop="startEdit(contact, 'next_visit_at')">
-                    <template v-if="isEditing(contact, 'next_visit_at')">
+                  <span class="contact-date">
+                    <template v-if="isCellEditing(contact, 'next_visit_at')">
                       <input type="date" class="inline-input date" v-model="editBufferDate" />
                       <input type="time" class="inline-input time" v-model="editBufferTime" />
                       <button class="inline-save" @click.stop="commitEdit(contact, 'next_visit_at')">Save</button>
@@ -249,8 +281,8 @@
                       <span v-if="contact.next_visit_at">{{ formatDate(contact.next_visit_at) }}</span>
                     </template>
                   </span>
-                  <span class="contact-notes mobile" @click.stop="startEdit(contact, 'notes')">
-                    <template v-if="isEditing(contact, 'notes')">
+                  <span class="contact-notes mobile">
+                    <template v-if="isCellEditing(contact, 'notes')">
                       <input
                         class="inline-input"
                         v-model="editBuffer"
@@ -265,6 +297,7 @@
                     </template>
                   </span>
                 </div>
+                
               </div>
               
               <!-- Add contact button for each bucket -->
@@ -289,7 +322,21 @@
       @close="closeDrawer"
       @save="handleSaveContact"
       @delete="handleDeleteContact"
+      @toggle-edit="switchToEdit"
+      @move="handleMoveDay"
     />
+    <!-- Phone move sheet -->
+    <div v-if="moveSheetVisible" class="move-sheet-overlay" @click="closeMoveSheet">
+      <div class="move-sheet" @click.stop>
+        <h4>Move to Day</h4>
+        <div class="chips-row">
+          <button v-for="b in chipRow1" :key="b" class="chip" @click="handleMoveDayFromSheet(b)">{{ getShortDayName(b) }}</button>
+        </div>
+        <div class="chips-row" style="margin-top: 0.25rem;">
+          <button v-for="b in chipRow2" :key="b" class="chip" @click="handleMoveDayFromSheet(b)">{{ getSpecialLabel(b) }}</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -308,12 +355,37 @@ export default {
     
     // Responsive state
     const isMobile = ref(false)
+    const isPhone = ref(false)
+    const isTouchDevice = ref(false)
     const selectedBucket = ref('')
+    const columnsContainer = ref(null)
+    const chipsExpanded = ref(true)
+    const chipRow1 = computed(() => ['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'])
+    const chipRow2 = computed(() => ['Flexible','NotAtHomes','Others'])
+    const selectMobileDay = (bucket) => {
+      selectedBucket.value = bucket
+      // Align carousel or scroll desktop columns accordingly
+      const idx = BUCKETS.indexOf(bucket)
+      if (isMobile.value) {
+        carouselIndex.value = Math.min(Math.max(idx, 0), Math.max(BUCKETS.length - 1, 0))
+      } else if (columnsContainer.value) {
+        const el = columnsContainer.value.querySelector(`[data-bucket="${bucket}"]`)
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+        }
+      }
+    }
     
     // Mobile carousel state
     const carouselIndex = ref(0)
     const carouselContainer = ref(null)
     const isTransitioning = ref(false)
+    const maxStartIndex = computed(() => BUCKETS.length - (isMobile.value ? 1 : 2))
+
+    const syncSelectedToIndex = () => {
+      const idx = Math.min(Math.max(carouselIndex.value, 0), BUCKETS.length - 1)
+      selectedBucket.value = BUCKETS[idx]
+    }
     
     // Touch/swipe state
     const touchStartX = ref(0)
@@ -322,6 +394,9 @@ export default {
     
     // Drawer state
     const showContactDrawer = ref(false)
+    // Feature flags
+    const enableMobileReorder = ref(true)
+
     const selectedContact = ref(null)
     const isEditing = ref(false)
     const saving = ref(false)
@@ -332,9 +407,75 @@ export default {
     const editBuffer = ref('')
     const editBufferDate = ref('')
     const editBufferTime = ref('')
-    const isAnyEditing = computed(() => !!editingContactId.value)
+    const isAnyCellEditing = computed(() => !!editingContactId.value)
+    const openContactDrawerView = (contact) => {
+      selectedContact.value = contact
+      // Open in edit mode for all devices per request
+      isEditing.value = true
+      showContactDrawer.value = true
+    }
 
-    const isEditing = (contact, field) => editingContactId.value === contact.id && editingField.value === field
+    // Mobile long-press detection with movement threshold to avoid accidental triggers during scrolls/swipes
+    let touchTimer = null
+    const longPressTriggered = ref(false)
+    const touchStartPoint = ref({ x: 0, y: 0 })
+    const movedBeyondThreshold = ref(false)
+    const LONG_PRESS_MS = 500
+    const MOVE_THRESHOLD_PX = 12
+
+    const onTouchStartCell = (contact, event) => {
+      const t = event.touches && event.touches[0]
+      touchStartPoint.value = { x: t ? t.clientX : 0, y: t ? t.clientY : 0 }
+      movedBeyondThreshold.value = false
+      longPressTriggered.value = false
+      clearTimeout(touchTimer)
+      touchTimer = setTimeout(() => {
+        if (!movedBeyondThreshold.value) {
+          if (isPhone.value) {
+            pendingMoveContact.value = contact
+            moveSheetVisible.value = true
+            longPressTriggered.value = true
+          } else {
+            openContactDrawerView(contact)
+          }
+        }
+      }, LONG_PRESS_MS)
+    }
+
+    const onTouchMoveCell = (event) => {
+      const t = event.touches && event.touches[0]
+      if (!t) return
+      const dx = Math.abs(t.clientX - touchStartPoint.value.x)
+      const dy = Math.abs(t.clientY - touchStartPoint.value.y)
+      if (dx > MOVE_THRESHOLD_PX || dy > MOVE_THRESHOLD_PX) {
+        movedBeyondThreshold.value = true
+        clearTimeout(touchTimer)
+      }
+    }
+
+    const onTouchEndCell = (contact, event) => {
+      clearTimeout(touchTimer)
+      // If not a long-press and not a scroll, show the peek pill on touch end
+      if (!longPressTriggered.value && !movedBeyondThreshold.value) {
+        armPreview(contact)
+      }
+      setTimeout(() => { longPressTriggered.value = false; movedBeyondThreshold.value = false }, 50)
+    }
+
+    const isCellEditing = (contact, field) => editingContactId.value === contact.id && editingField.value === field
+
+    // Peek button logic
+    const armedContactId = ref(null)
+    let armTimeout = null
+    const armPreview = (contact, event) => {
+      if (longPressTriggered.value) {
+        // Skip peek if we just did a long-press action
+        return
+      }
+      armedContactId.value = contact.id
+      clearTimeout(armTimeout)
+      armTimeout = setTimeout(() => { armedContactId.value = null }, 2500)
+    }
 
     const startEdit = (contact, field) => {
       editingContactId.value = contact.id
@@ -387,8 +528,13 @@ export default {
 
     // Check if mobile
     const checkMobile = () => {
-      isMobile.value = window.innerWidth < 768
+      const w = window.innerWidth
+      isMobile.value = w <= 1024
+      isPhone.value = w <= 600
     }
+
+    // Always show chips (requested), they wrap nicely on wide screens
+    const showChips = computed(() => true)
 
     // Filter contacts by bucket for mobile
     const filteredContacts = computed(() => {
@@ -397,15 +543,66 @@ export default {
     })
 
     // Tag filter
-    const activeTag = ref('')
+    const selectedTags = ref([])
+    // Search
+    const searchInput = ref('')
+    const searchInputRef = ref(null)
+    const searchQuery = computed(() => searchInput.value.trim().toLowerCase())
+    const clearSearch = () => { searchInput.value = '' }
+    const highlight = (text) => {
+      const q = searchQuery.value
+      if (!q || !text) return (text || '')
+      const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      return (text || '').replace(new RegExp(esc, 'gi'), (m) => `<mark>${m}</mark>`)
+    }
+
+    // Filter dropdown
+    const showFilterMenu = ref(false)
+    const filterDropdownRef = ref(null)
+    const toggleFilters = () => { showFilterMenu.value = !showFilterMenu.value }
+    const clearTags = () => { selectedTags.value = [] }
     const allTags = computed(() => MINISTRY_TAGS)
+
+    // Sorting state (keep manual only for now)
+    const sortField = ref('manual')
+    const sortDir = ref('asc')
 
     // Get contacts for a specific bucket
     const getBucketContacts = (bucket) => {
-      return contacts.value
-        .filter(contact => contact.bucket === bucket)
-        .filter(contact => !activeTag.value || (contact.tags || '') === activeTag.value)
-        .sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+      let list = contacts.value.filter(contact => contact.bucket === bucket)
+
+      // Search by name or hostel (AND with tag filters)
+      if (searchQuery.value) {
+        list = list.filter(c => {
+          const n = (c.name || '').toLowerCase()
+          const h = (c.hostel_name || '').toLowerCase()
+          return n.includes(searchQuery.value) || h.includes(searchQuery.value)
+        })
+      }
+
+      // Multi-tag filter (Any): items whose tag matches any selected
+      if (selectedTags.value.length > 0) {
+        list = list.filter(c => {
+          const tag = (c.tags || '').trim()
+          if (!tag) return false
+          return selectedTags.value.includes(tag)
+        })
+      }
+
+      // Sorting
+      if (sortField.value === 'manual') {
+        list.sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
+      } else if (sortField.value === 'name') {
+        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      } else if (sortField.value === 'date') {
+        const toTs = v => v ? new Date(v).getTime() : 0
+        list.sort((a, b) => toTs(a.next_visit_at) - toTs(b.next_visit_at))
+      } else if (sortField.value === 'hostel') {
+        list.sort((a, b) => (a.hostel_name || '').localeCompare(b.hostel_name || ''))
+      }
+
+      if (sortDir.value === 'desc') list.reverse()
+      return list
     }
 
     // Format date for display
@@ -437,20 +634,55 @@ export default {
       isEditing.value = false
     }
 
+    const switchToEdit = () => {
+      isEditing.value = true
+    }
+
+    const handleMoveDay = async (bucket) => {
+      if (!selectedContact.value || !selectedContact.value.id) return
+      try {
+        await updateContact(selectedContact.value.id, { bucket })
+      } finally {
+        // Keep drawer open
+      }
+    }
+
+    // Move sheet state (phones)
+    const moveSheetVisible = ref(false)
+    const pendingMoveContact = ref(null)
+    const closeMoveSheet = () => {
+      moveSheetVisible.value = false
+      pendingMoveContact.value = null
+    }
+    const handleMoveDayFromSheet = async (bucket) => {
+      if (!pendingMoveContact.value) return
+      try {
+        await updateContact(pendingMoveContact.value.id, { bucket })
+      } finally {
+        closeMoveSheet()
+      }
+    }
+
     const selectDay = (bucket) => {
       selectedBucket.value = bucket
     }
 
     // Mobile carousel navigation
     const getVisibleBuckets = () => {
-      // Show 2 buckets at a time, starting from carouselIndex
+      if (isMobile.value) {
+        if (!selectedBucket.value) {
+          selectedBucket.value = BUCKETS[carouselIndex.value]
+        }
+        return [selectedBucket.value]
+      }
       return BUCKETS.slice(carouselIndex.value, carouselIndex.value + 2)
     }
 
     const goToNextDay = async () => {
-      if (carouselIndex.value < BUCKETS.length - 2 && !isTransitioning.value) {
+      if (carouselIndex.value < maxStartIndex.value && !isTransitioning.value) {
         isTransitioning.value = true
         carouselIndex.value++
+        syncSelectedToIndex()
         
         // Add a small delay for smooth animation
         setTimeout(() => {
@@ -463,6 +695,7 @@ export default {
       if (carouselIndex.value > 0 && !isTransitioning.value) {
         isTransitioning.value = true
         carouselIndex.value--
+        syncSelectedToIndex()
         
         // Add a small delay for smooth animation
         setTimeout(() => {
@@ -476,12 +709,13 @@ export default {
       if (dayIndex < carouselIndex.value) {
         carouselIndex.value = Math.max(0, dayIndex)
       } else if (dayIndex >= carouselIndex.value + 2) {
-        carouselIndex.value = Math.min(BUCKETS.length - 2, dayIndex - 1)
+        carouselIndex.value = Math.min(maxStartIndex.value, dayIndex - 1)
       }
+      syncSelectedToIndex()
     }
 
     const canGoPrev = computed(() => carouselIndex.value > 0)
-    const canGoNext = computed(() => carouselIndex.value < BUCKETS.length - 2)
+    const canGoNext = computed(() => carouselIndex.value < maxStartIndex.value)
 
     // Touch and swipe handlers
     const handleTouchStart = (event) => {
@@ -557,9 +791,16 @@ export default {
         'Friday': 'Fri',
         'Flexible': 'Flexible',
         'Others': 'Others',
-        'NotAtHomes': 'NotAtHomes'
+        'NotAtHomes': 'NAH'
       }
       return shortNames[bucket] || bucket
+    }
+
+    const getSpecialLabel = (bucket) => {
+      if (bucket === 'Flexible') return 'Flexible days'
+      if (bucket === 'NotAtHomes') return 'Not at homes'
+      if (bucket === 'Others') return 'Others'
+      return bucket
     }
 
     // Handle save contact (add or edit)
@@ -717,37 +958,23 @@ export default {
       }
     }
 
-    // CSV export
-    const escapeCsv = (value) => {
-      if (value == null) return ''
-      const str = String(value)
-      if (/[",\n]/.test(str)) {
-        return '"' + str.replace(/"/g, '""') + '"'
-      }
-      return str
-    }
-
-    const exportCsv = () => {
-      const headers = ['name','phone','bucket','next_visit_at','hostel_name','location_detail','last_outcome','notes','tags']
-      const rows = contacts.value
-        .filter(c => !activeTag.value || (c.tags || '') === activeTag.value)
-        .map(c => headers.map(h => escapeCsv(c[h])))
-      const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `rv-contacts-export-${new Date().toISOString().slice(0,10)}.csv`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-    }
 
     // Lifecycle
     onMounted(() => {
       checkMobile()
+      isTouchDevice.value = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
       window.addEventListener('resize', checkMobile)
+      // Close filters on outside click
+      const onDocClick = (e) => {
+        if (!showFilterMenu.value) return
+        const root = filterDropdownRef.value
+        if (root && !root.contains(e.target)) {
+          showFilterMenu.value = false
+        }
+      }
+      document.addEventListener('click', onDocClick)
+      // Store to remove later
+      window.__rv_onDocClick = onDocClick
     })
 
     // Drag and drop handlers
@@ -965,6 +1192,10 @@ export default {
 
     onUnmounted(() => {
       window.removeEventListener('resize', checkMobile)
+      if (window.__rv_onDocClick) {
+        document.removeEventListener('click', window.__rv_onDocClick)
+        delete window.__rv_onDocClick
+      }
     })
 
           return {
@@ -972,12 +1203,17 @@ export default {
         contacts,
         BUCKETS,
         isMobile,
+        isPhone,
         selectedBucket,
         filteredContacts,
+        armedContactId,
+        enableMobileReorder: ref(true),
         
         // Mobile carousel
         carouselIndex,
         carouselContainer,
+        columnsContainer,
+        chipsExpanded,
         isTransitioning,
         getVisibleBuckets,
         goToNextDay,
@@ -990,6 +1226,9 @@ export default {
         handleTouchStart,
         handleTouchMove,
         handleTouchEnd,
+        onTouchStartCell,
+        onTouchMoveCell,
+        onTouchEndCell,
         handleWheel,
         
         // Drawer state
@@ -1007,12 +1246,19 @@ export default {
         getBucketContacts,
         formatDate,
         openContactDrawer,
+        openContactDrawerView,
         openAddContactDrawer,
         closeDrawer,
+        armPreview,
         selectDay,
         getShortDayName,
+        getSpecialLabel,
         handleSaveContact,
         handleDeleteContact,
+        // Move sheet
+        moveSheetVisible,
+        closeMoveSheet,
+        handleMoveDayFromSheet,
         
         // Drag and drop methods
         handleDragStart,
@@ -1036,18 +1282,36 @@ export default {
         // Day badge colors
         getDayBadgeStyle,
         // inline editing
-        isAnyEditing,
-        isEditing,
+        isAnyCellEditing,
+        isCellEditing,
         startEdit,
         cancelEdit,
         commitEdit,
         editBuffer,
         editBufferDate,
         editBufferTime,
-        // tag filter & export
-        activeTag,
+        // chips visibility
+        showChips,
+        chipRow1,
+        chipRow2,
+        selectMobileDay,
+        // search
+        searchInput,
+        searchInputRef,
+        searchQuery,
+        clearSearch,
+        highlight,
+        // tag filter + sorting
         allTags,
-        exportCsv
+        selectedTags,
+        // filter dropdown controls
+        showFilterMenu,
+        filterDropdownRef,
+        toggleFilters,
+        clearTags,
+        // sorting (manual only for now; kept for future)
+        sortField,
+        sortDir
       }
   }
 }
@@ -1068,6 +1332,41 @@ export default {
   padding: 1rem;
   background-color: var(--cell-background-color);
   border-bottom: 1px solid var(--border-color);
+}
+
+.mobile-day-chips { padding: 0.35rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.chips-row { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.chip {
+  padding: 0.22rem 0.5rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  color: var(--text-color);
+  border-radius: 999px;
+  font-size: 0.8rem;
+}
+.chip.active { background: var(--primary-color); color: #fff; border-color: var(--primary-color); }
+
+.chips-collapsible { padding: 0 0.75rem; }
+.chips-toggle {
+  margin: 0.25rem 0 0.1rem 0;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  color: var(--text-color);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.chips-toggle .chev { display: inline-block; transition: transform 0.2s ease; }
+.chips-toggle .chev.open { transform: rotate(180deg); }
+
+/* Extra-tight chips on small phones */
+@media (max-width: 420px) {
+  .mobile-day-chips { padding: 0.25rem 0.75rem; gap: 0.2rem; }
+  .mobile-day-chips .chips-row { gap: 0.2rem; }
+  .mobile-day-chips .chip {
+    padding: 0.16rem 0.38rem;
+    font-size: 0.72rem;
+  }
 }
 
 .nav-arrow {
@@ -1221,6 +1520,49 @@ export default {
   padding: 0.5rem 0.75rem;
 }
 
+.search-wrap { display: flex; align-items: center; gap: 0.5rem; flex: 1; }
+.search-input {
+  width: 100%;
+  max-width: 360px;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+}
+.search-count { font-size: 0.85rem; color: #666; }
+mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
+
+.toolbar-actions { position: relative; }
+.filter-btn {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--border-color);
+  background: white;
+  color: var(--text-color);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.filter-btn:hover { background: var(--cell-background-color); }
+.dropdown { position: relative; display: inline-block; }
+.filter-menu {
+  position: absolute;
+  z-index: 1000;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 260px;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: white;
+  color: var(--text-color);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+  max-height: 60vh;
+  overflow: auto;
+}
+.filter-title { font-weight: 600; margin-bottom: 0.5rem; }
+.filter-actions { display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 0.5rem; }
+.apply-btn { padding: 0.35rem 0.6rem; border: 1px solid var(--primary-color); background: var(--primary-color); color: #fff; border-radius: 4px; }
+.clear-btn { padding: 0.35rem 0.6rem; border: 1px solid var(--border-color); background: white; color: var(--text-color); border-radius: 4px; }
+.clear-btn:hover { background: var(--cell-background-color); }
+
 .filter-group label {
   margin-right: 0.5rem;
   font-size: 0.9rem;
@@ -1231,6 +1573,18 @@ export default {
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--border-color);
   border-radius: 4px;
+}
+
+.tag-checkboxes { display: flex; flex-direction: column; gap: 0.35rem; }
+.tag-option { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+
+.tag-mode { margin-left: 0.75rem; }
+
+.sort-group {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .export-btn {
@@ -1325,6 +1679,27 @@ export default {
   justify-content: center;
 }
 
+/* Peek/armed styling */
+.contact-cell.armed {
+  outline: 2px solid var(--primary-color);
+  position: relative;
+}
+
+.peek-actions {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.peek-actions .peek-btn {
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  border-radius: 12px;
+  border: 1px solid var(--primary-color);
+  background: white;
+  color: var(--primary-color);
+}
+
 .inline-input {
   width: 100%;
   padding: 0.2rem 0.35rem;
@@ -1356,8 +1731,30 @@ export default {
   border-radius: 6px;
   background-color: white;
   border: 1px solid var(--border-color);
-  cursor: pointer;
+  cursor: default; /* prevent grab cursor on mobile */
   transition: all 0.2s ease;
+}
+
+/* Phone move sheet */
+.move-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 2000;
+}
+.move-sheet {
+  width: 100%;
+  background: white;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+  padding: 0.75rem;
+  box-shadow: 0 -6px 16px rgba(0,0,0,0.15);
+}
+.move-sheet h4 {
+  margin: 0 0 0.5rem 0;
 }
 
 .contact-cell.mobile:hover {

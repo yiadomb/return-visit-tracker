@@ -1,6 +1,7 @@
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
 import { contactService, BUCKETS, MINISTRY_TAGS, OUTCOMES } from '../services/db.js'
 import { notificationService } from '../services/notificationService.js'
+import { syncService } from '../services/syncService.js'
 
 export function useContacts() {
   const contacts = ref([])
@@ -41,6 +42,8 @@ export function useContacts() {
     try {
       const newContact = await contactService.create(contactData)
       contacts.value.push(newContact)
+      // Trigger cloud sync (non-blocking)
+      syncService.syncAll().catch(err => console.warn('Sync after add failed:', err))
       
       // Schedule notification if this contact has a future visit (non-blocking)
       notificationService.onContactUpdated(newContact).catch(notifError => {
@@ -65,7 +68,9 @@ export function useContacts() {
       const index = contacts.value.findIndex(contact => contact.id === id)
       const oldContact = index !== -1 ? { ...contacts.value[index] } : null
       
-      const updatedContact = await contactService.update(id, changes)
+      const updatedContact = await contactService.update(id, { ...changes, updated_at: new Date().toISOString() })
+      // Trigger cloud sync (non-blocking)
+      syncService.syncAll().catch(err => console.warn('Sync after update failed:', err))
       if (index !== -1) {
         contacts.value[index] = updatedContact
       }
@@ -92,6 +97,8 @@ export function useContacts() {
     try {
       await contactService.delete(id)
       contacts.value = contacts.value.filter(contact => contact.id !== id)
+      // Trigger cloud sync (non-blocking)
+      syncService.syncAll().catch(err => console.warn('Sync after delete failed:', err))
       
       // Remove any scheduled notifications for this contact
       await notificationService.onContactDeleted(id)
@@ -109,7 +116,20 @@ export function useContacts() {
   // Load contacts on mount
   onMounted(() => {
     loadContacts()
+    // Pull latest on mount
+    if (syncService.isReady()) {
+      syncService.pullAll().then(() => loadContacts()).catch(() => {})
+    }
   })
+
+  // When the app regains focus (SPA navigation), try a quick pull
+  if (typeof window !== 'undefined') {
+    window.addEventListener('focus', () => {
+      if (syncService.isReady()) {
+        syncService.pullAll().then(() => loadContacts()).catch(() => {})
+      }
+    })
+  }
 
   return {
     // State
