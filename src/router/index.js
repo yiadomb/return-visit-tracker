@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
 import AgendaView from '../views/AgendaView.vue'
+import LoginView from '../views/LoginView.vue'
 
 const routes = [
   {
@@ -18,6 +19,12 @@ const routes = [
     meta: {
       title: 'Today\'s Agenda'
     }
+  },
+  {
+    path: '/login',
+    name: 'Login',
+    component: LoginView,
+    meta: { title: 'Sign in' }
   }
 ]
 

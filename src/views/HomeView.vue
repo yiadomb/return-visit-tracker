@@ -33,6 +33,7 @@
 import { useContacts } from '../composables/useDb.js'
 import { notificationService } from '../services/notificationService.js'
 import { syncService } from '../services/syncService.js'
+import { authService } from '../services/authService.js'
 import ContactGrid from '../components/features/ContactGrid.vue'
 import ContactDrawer from '../components/features/ContactDrawer.vue'
 import { onMounted, ref } from 'vue'
@@ -98,6 +99,15 @@ export default {
       } catch (error) {
         console.warn('Failed to initialize notifications:', error)
       }
+
+      // If not logged in (once auth enabled), redirect to /login
+      try {
+        const user = await authService.getUser().catch(() => null)
+        if (!user) {
+          // For now, we allow anonymous usage; uncomment to enforce login later:
+          // return router.push('/login')
+        }
+      } catch {}
 
       // Kick off initial cloud sync if configured
       try {
