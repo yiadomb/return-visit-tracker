@@ -1,7 +1,7 @@
 <template>
   <div class="contact-grid">
     <!-- Desktop: Full Grid -->
-    <div class="grid-container" :class="{ 'mobile-view': isMobile }">
+    <div class="grid-container" :class="{ 'mobile-view': isMobile }" @touchstart.passive="handleOuterTouchStart" @touchend.passive="handleOuterTouchEnd">
       <div class="grid-toolbar">
         <div class="search-wrap">
           <input
@@ -344,6 +344,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useContacts } from '../../composables/useDb.js'
 import ContactDrawer from './ContactDrawer.vue'
+import { getHostelColors } from '../../utils/hostelColor.js'
+import router from '../../router/index.js'
 
 export default {
   name: 'ContactGrid',
@@ -763,6 +765,45 @@ export default {
       isDragging.value = false
     }
 
+    // Outer swipe to navigate between routes (Contacts <-> Agenda)
+    const outerTouchStartX = ref(0)
+    const outerTouchStartY = ref(0)
+    const handleOuterTouchStart = (event) => {
+      // Ignore gestures inside interactive areas (day carousel, inputs, buttons)
+      const target = event.target
+      if (
+        target.closest('.mobile-carousel-container') ||
+        target.closest('.bucket-columns') ||
+        target.closest('input, textarea, button, a, .contact-cell')
+      ) {
+        outerTouchStartX.value = 0
+        outerTouchStartY.value = 0
+        return
+      }
+      const t = event.touches && event.touches[0]
+      if (!t) return
+      outerTouchStartX.value = t.clientX
+      outerTouchStartY.value = t.clientY
+    }
+    const handleOuterTouchEnd = (event) => {
+      if (!outerTouchStartX.value && !outerTouchStartY.value) return
+      const t = event.changedTouches && event.changedTouches[0]
+      if (!t) return
+      const dx = t.clientX - outerTouchStartX.value
+      const dy = Math.abs(t.clientY - outerTouchStartY.value)
+      // Reset start so we don't chain gestures
+      outerTouchStartX.value = 0
+      outerTouchStartY.value = 0
+      if (Math.abs(dx) > 80 && Math.abs(dx) > dy) {
+        const current = router.currentRoute.value.name
+        if (dx < 0 && current === 'Home') {
+          router.push({ name: 'Agenda' })
+        } else if (dx > 0 && current === 'Agenda') {
+          router.push({ name: 'Home' })
+        }
+      }
+    }
+
     // Mouse wheel and trackpad gesture support for desktop
     const handleWheel = (event) => {
       if (isMobile.value || isTransitioning.value) return
@@ -926,9 +967,9 @@ export default {
       }
     }
 
-    // Get hostel color styling
+    // Get hostel color styling (shared util)
     const getHostelStyle = (hostelName) => {
-      const colors = generateHostelColor(hostelName)
+      const colors = getHostelColors(hostelName)
       return {
         backgroundColor: colors.background,
         borderLeftColor: colors.border,
@@ -1226,6 +1267,8 @@ export default {
         handleTouchStart,
         handleTouchMove,
         handleTouchEnd,
+        handleOuterTouchStart,
+        handleOuterTouchEnd,
         onTouchStartCell,
         onTouchMoveCell,
         onTouchEndCell,

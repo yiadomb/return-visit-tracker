@@ -118,7 +118,28 @@ export function useContacts() {
     loadContacts()
     // Pull latest on mount
     if (syncService.isReady()) {
+      // Ensure sync realtime/polling is initialized
+      try { syncService.init() } catch {}
       syncService.pullAll().then(() => loadContacts()).catch(() => {})
+    }
+    // Listen for explicit refresh events from the app header
+    if (!window.__rv_refreshBound) {
+      const onRefresh = async () => {
+        // Announce refresh start (for global UI like header button)
+        try { window.dispatchEvent(new CustomEvent('rv:refresh:start')) } catch {}
+        try {
+          if (syncService.isReady()) {
+            await syncService.syncAll()
+          }
+        } finally {
+          await loadContacts()
+          // Announce refresh end regardless of outcome
+          try { window.dispatchEvent(new CustomEvent('rv:refresh:end')) } catch {}
+        }
+      }
+      window.addEventListener('rv:refresh', onRefresh)
+      window.__rv_onRefresh = onRefresh
+      window.__rv_refreshBound = true
     }
   })
 

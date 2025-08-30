@@ -1,5 +1,5 @@
 <template>
-  <div class="agenda-view">
+  <div class="agenda-view" @touchstart.passive="onOuterTouchStart" @touchend.passive="onOuterTouchEnd">
     <div class="agenda-header">
       <h1>Today's Agenda</h1>
       <p class="date-display">{{ todayDisplay }}</p>
@@ -84,6 +84,8 @@ import { ref, computed, onMounted } from 'vue'
 import ContactDrawer from '../components/features/ContactDrawer.vue'
 import { useContacts } from '../composables/useDb'
 import { notificationService } from '../services/notificationService'
+import { getHostelColors } from '../utils/hostelColor.js'
+import router from '../router'
 
 export default {
   name: 'AgendaView',
@@ -143,81 +145,44 @@ export default {
       })
     }
 
-    // Hostel color styling (reusing from ContactGrid)
-    const extractHostelName = (fullText) => {
-      if (!fullText || fullText.trim() === '' || fullText === 'No hostel') return 'default'
-      
-      const normalized = fullText.toLowerCase().trim()
-      const stopWords = ['hostel', 'hall', 'residence', 'block', 'room', 'floor', 'building']
-      const modifiers = [
-        'annex', 'apartment', 'inn', 'lodge', 'court', 'plaza', 'towers',
-        'old', 'new', 'north', 'south', 'east', 'west', 'upper', 'lower',
-        'phase', '1', '2', '3', 'a', 'b', 'c', 'd', 'e'
-      ]
-      
-      const words = normalized.split(/[\s,.-_]+/).filter(word => word.length > 0)
-      let baseName = ''
-      let modifier = ''
-      
-      for (const word of words) {
-        if (!stopWords.includes(word)) {
-          if (!baseName) {
-            baseName = word
-          } else if (modifiers.includes(word)) {
-            modifier = word
-            break
-          }
-        }
+    // Outer swipe navigation between Agenda and Contacts
+    const outerStartX = ref(0)
+    const outerStartY = ref(0)
+    const onOuterTouchStart = (event) => {
+      const t = event.touches && event.touches[0]
+      if (!t) return
+      // Ignore when interacting with inputs or buttons
+      const target = event.target
+      if (target.closest('input, textarea, button, a')) {
+        outerStartX.value = 0
+        outerStartY.value = 0
+        return
       }
-      
-      return modifier ? `${baseName}_${modifier}` : baseName
+      outerStartX.value = t.clientX
+      outerStartY.value = t.clientY
     }
-
-    const generateHostelColor = (hostelName) => {
-      const extractedName = extractHostelName(hostelName)
-      
-      if (extractedName === 'default') {
-        return {
-          background: '#f8f9fb',
-          border: '#ddd',
-          text: '#666'
+    const onOuterTouchEnd = (event) => {
+      if (!outerStartX.value && !outerStartY.value) return
+      const t = event.changedTouches && event.changedTouches[0]
+      if (!t) return
+      const dx = t.clientX - outerStartX.value
+      const dy = Math.abs(t.clientY - outerStartY.value)
+      outerStartX.value = 0
+      outerStartY.value = 0
+      if (Math.abs(dx) > 80 && Math.abs(dx) > dy) {
+        const current = router.currentRoute.value.name
+        if (dx > 0 && current === 'Agenda') {
+          router.push({ name: 'Home' })
+        } else if (dx < 0 && current === 'Home') {
+          router.push({ name: 'Agenda' })
+        } else if (dx > 0) {
+          router.push({ name: 'Home' })
         }
-      }
-      
-      let hash = 0
-      for (let i = 0; i < extractedName.length; i++) {
-        const char = extractedName.charCodeAt(i)
-        hash = ((hash << 5) - hash) + char
-        hash = hash & hash
-      }
-      
-      const colorPalette = [
-        { bg: '#e3f2fd', border: '#2196f3', text: '#1565c0' },
-        { bg: '#f3e5f5', border: '#9c27b0', text: '#7b1fa2' },
-        { bg: '#e8f5e8', border: '#4caf50', text: '#388e3c' },
-        { bg: '#fff3e0', border: '#ff9800', text: '#f57c00' },
-        { bg: '#fce4ec', border: '#e91e63', text: '#c2185b' },
-        { bg: '#e0f2f1', border: '#009688', text: '#00695c' },
-        { bg: '#f1f8e9', border: '#8bc34a', text: '#689f38' },
-        { bg: '#e8eaf6', border: '#3f51b5', text: '#303f9f' },
-        { bg: '#fff8e1', border: '#ffc107', text: '#f9a825' },
-        { bg: '#ffebee', border: '#f44336', text: '#d32f2f' },
-        { bg: '#f3e5f5', border: '#673ab7', text: '#512da8' },
-        { bg: '#e0f7fa', border: '#00bcd4', text: '#0097a7' }
-      ]
-      
-      const colorIndex = Math.abs(hash) % colorPalette.length
-      const colors = colorPalette[colorIndex]
-      
-      return {
-        background: colors.bg,
-        border: colors.border,
-        text: colors.text
       }
     }
 
     const getHostelStyle = (hostelName) => {
-      const colors = generateHostelColor(hostelName)
+      const colors = getHostelColors(hostelName)
       return {
         backgroundColor: colors.background,
         borderLeftColor: colors.border,
@@ -310,7 +275,9 @@ export default {
       openContactDrawer,
       closeDrawer,
       handleSaveContact,
-      handleDeleteContact
+      handleDeleteContact,
+      onOuterTouchStart,
+      onOuterTouchEnd
     }
   }
 }

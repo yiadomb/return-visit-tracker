@@ -1,7 +1,7 @@
 <template>
   <div class="home-view">
     <div class="toolbar">
-      <button @click="openAddContactDrawer">Add Contact</button>
+      <button class="btn-small" @click="openAddContactDrawer">Add Contact</button>
     </div>
     
     <!-- Loading state -->
@@ -154,6 +154,8 @@ export default {
   gap: 1rem;
   align-items: center;
 }
+
+.btn-small { padding: 0.4rem 0.7rem; border: 1px solid var(--primary-color); background: var(--primary-color); color: #fff; border-radius: 6px; font-size: 0.9rem; }
 
 
 
