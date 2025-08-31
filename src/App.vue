@@ -40,6 +40,7 @@
 
 <script>
 import SettingsMenu from './components/SettingsMenu.vue'
+import { syncService } from './services/syncService.js'
 export default { 
   name: 'App', 
   components: { SettingsMenu },
@@ -61,11 +62,18 @@ export default {
     if (this._onRefreshEnd) window.removeEventListener('rv:refresh:end', this._onRefreshEnd)
   },
   methods: {
-    refreshNow() {
+    async refreshNow() {
       // Provide immediate visual feedback
       this.isRefreshing = true
-      // Dispatch a global refresh event that composables can listen to
-      window.dispatchEvent(new CustomEvent('rv:refresh'))
+      try {
+        if (syncService.isReady()) {
+          try { syncService.init() } catch {}
+          await syncService.syncAll()
+        }
+      } finally {
+        // Ask composables to reload local data and emit end event
+        window.dispatchEvent(new CustomEvent('rv:refresh'))
+      }
     }
   }
 }
