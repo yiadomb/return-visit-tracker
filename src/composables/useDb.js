@@ -1,5 +1,6 @@
-import { ref, computed, onMounted, onActivated } from 'vue'
-import { contactService, BUCKETS, MINISTRY_TAGS, OUTCOMES } from '../services/db.js'
+import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
+import { liveQuery } from 'dexie'
+import { contactService, BUCKETS, MINISTRY_TAGS, OUTCOMES, db } from '../services/db.js'
 import { notificationService } from '../services/notificationService.js'
 import { syncService } from '../services/syncService.js'
 
@@ -116,6 +117,17 @@ export function useContacts() {
   // Load contacts on mount
   onMounted(() => {
     loadContacts()
+    // Live update: subscribe to Dexie changes so UI updates instantly after sync
+    try {
+      const subscription = liveQuery(() => db.contacts.orderBy('name').toArray()).subscribe({
+        next: (rows) => { contacts.value = rows || [] },
+        error: (e) => { console.warn('liveQuery error', e) }
+      })
+      // Clean up on unmount
+      onUnmounted(() => { try { subscription.unsubscribe() } catch {} })
+    } catch (e) {
+      console.warn('Failed to start liveQuery subscription; falling back to manual loads', e)
+    }
     // Pull latest on mount
     if (syncService.isReady()) {
       // Ensure sync realtime/polling is initialized
