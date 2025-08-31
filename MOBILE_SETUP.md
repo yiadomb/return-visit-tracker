@@ -44,6 +44,24 @@ Your Return Visit Tracker app is now ready for mobile use! You have two options 
 ✅ Capacitor Android project synced
 ✅ Production build ready
 
+## Supabase Setup (for cross‑device sync)
+
+1. Create a new Supabase project.
+2. Go to SQL Editor and run the script in `Docs/supabase_schema.sql`.
+3. In the project settings, copy:
+   - Project URL → `VITE_SUPABASE_URL`
+   - anon public key → `VITE_SUPABASE_ANON_KEY`
+4. In this project folder, create a `.env` file (copy from `.env.example`) and fill the values:
+   ```
+   VITE_SUPABASE_URL=https://YOUR-PROJECT.ref.supabase.co
+   VITE_SUPABASE_ANON_KEY=YOUR_ANON_KEY
+   ```
+5. Build the web bundle and sync native:
+   ```
+   npm run build && npx cap sync
+   ```
+6. Install and open the app on each device, sign in with the same email/password. The first device will push its local contacts, and other devices will pull them within a few seconds.
+
 ## Testing the PWA:
 1. Visit http://localhost:4173 on your phone's browser
 2. Test the install prompt
