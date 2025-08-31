@@ -129,6 +129,8 @@ export function useContacts() {
         try { window.dispatchEvent(new CustomEvent('rv:refresh:start')) } catch {}
         try {
           if (syncService.isReady()) {
+            // Ensure realtime/polling is initialized before attempting a sync
+            try { syncService.init() } catch {}
             await syncService.syncAll()
           }
         } finally {
