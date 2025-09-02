@@ -2,7 +2,11 @@
   <div class="contact-grid">
     <!-- Desktop: Full Grid -->
     <div class="grid-container" :class="{ 'mobile-view': isMobile }" @touchstart.passive="handleOuterTouchStart" @touchend.passive="handleOuterTouchEnd">
-      <div class="grid-toolbar">
+      <div class="controls-panel">
+        <div class="top-add-row">
+          <button class="add-top-btn" @click="openAddContactDrawer()">Add Contact</button>
+        </div>
+        <div class="grid-toolbar controls-card">
         <div class="search-wrap">
           <input
             ref="searchInputRef"
@@ -31,11 +35,13 @@
             </div>
           </div>
         </div>
+        </div>
       </div>
-      <!-- Chips below toolbar so they never get squeezed out -->
-      <div class="chips-collapsible">
-        <button class="chips-toggle" @click="chipsExpanded = !chipsExpanded" :aria-expanded="chipsExpanded">
-          Days <span class="chev" :class="{ open: chipsExpanded }">▾</span>
+      <!-- Chips (Days) shown only on phones) -->
+      <div v-if="isMobile" class="chips-collapsible">
+        <button class="chips-toggle full-width" @click="chipsExpanded = !chipsExpanded" :aria-expanded="chipsExpanded">
+          <span>Days</span>
+          <span class="chev" :class="{ open: chipsExpanded }">▾</span>
         </button>
         <div v-show="chipsExpanded" class="mobile-day-chips toolbar-chips">
           <div class="chips-row">
@@ -53,7 +59,7 @@
       <button 
               v-for="bucket in chipRow2"
               :key="bucket"
-              class="chip"
+              class="chip special"
               :class="{ active: selectedBucket === bucket }"
               @click="selectMobileDay(bucket)"
             >
@@ -62,11 +68,9 @@
     </div>
         </div>
       </div>
-      <!-- Service year indicator for desktop -->
-      <div v-if="!isMobile && BUCKETS.length > 5" class="scroll-hint">
-        <span>2025 Service Year</span>
-      </div>
-      
+      <!-- Service year indicator removed per request -->
+
+      <div class="contacts-scroll">
       <div v-if="!isMobile" class="bucket-columns" ref="columnsContainer">
         <div 
           v-for="bucket in BUCKETS" 
@@ -82,9 +86,10 @@
           <div class="bucket-header">
             <h3>{{ bucket }}</h3>
             <span class="contact-count">({{ getBucketContacts(bucket).length }})</span>
+            <button class="add-icon-btn" @click="openAddContactDrawer(bucket)" :title="`Add contact to ${bucket}`" aria-label="Add contact">＋</button>
           </div>
           
-          <div class="contacts-in-bucket">
+          <div class="contacts-in-bucket per-bucket-scroll">
             <div 
               v-for="(contact, index) in getBucketContacts(bucket)" 
               :key="contact.id"
@@ -99,16 +104,14 @@
                 v-if="draggedContact && dragOverPosition === `${bucket}-${index}-top`"
                 class="insertion-line"
               ></div>
-              <!-- Peek actions: show a small View button after single click -->
-              <div v-if="armedContactId === contact.id" class="peek-actions">
-                <button class="peek-btn" @click.stop="openContactDrawerView(contact)">View</button>
-              </div>
+
               <div 
                 class="contact-cell"
                 :draggable="!isPhone && !isAnyCellEditing"
                 @dragstart="handleDragStart($event, contact)"
                 @dragend="handleDragEnd"
                 @click="armPreview(contact, $event)"
+                @dblclick="openContactDrawerView(contact)"
                 @contextmenu.prevent
                 :class="{ armed: armedContactId === contact.id }"
               >
@@ -128,10 +131,7 @@
                     <span v-html="highlight(contact.name)"></span>
                   </template>
                 </div>
-                <!-- Peek actions: show a small View button after single tap -->
-                <div v-if="armedContactId === contact.id" class="peek-actions mobile">
-                  <button class="peek-btn" @click.stop="openContactDrawerView(contact)">View</button>
-                </div>
+
                 <!-- Hostel -->
                 <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
                   <template v-if="isCellEditing(contact, 'hostel_name')">
@@ -146,6 +146,9 @@
                   </template>
                   <template v-else>
                     <span v-html="highlight(contact.hostel_name || 'No hostel')"></span>
+                    <span v-if="contact.location_detail" class="location-detail">
+                      · {{ contact.location_detail }}
+                    </span>
                   </template>
                 </div>
 
@@ -190,13 +193,9 @@
               ></div>
             </div>
             
-            <!-- Add contact button for each bucket -->
-            <button 
-              class="add-contact-btn"
-              @click="openAddContactDrawer(bucket)"
-            >
-              + Add Contact
-            </button>
+            <!-- End-of-list indicator (desktop/tablet) - only show if bucket has many contacts -->
+            <div v-if="getBucketContacts(bucket).length > 5" class="end-of-list" aria-hidden="true">End of list</div>
+            <!-- per-bucket add removed (now in header) -->
           </div>
         </div>
       </div>
@@ -223,13 +222,14 @@
             <div class="mobile-bucket-header">
               <h3>{{ bucket }}</h3>
               <span class="mobile-contact-count">({{ getBucketContacts(bucket).length }})</span>
+              <button class="add-icon-btn" @click="openAddContactDrawer(bucket)" :title="`Add contact to ${bucket}`" aria-label="Add contact">＋</button>
             </div>
             
             <div class="mobile-contacts-in-bucket">
               <div 
                 v-for="contact in getBucketContacts(bucket)" 
                 :key="contact.id"
-                class="contact-cell mobile"
+                class="contact-cell"
                 :draggable="false"
                 @click="armPreview(contact, $event)"
                 @touchstart.passive="onTouchStartCell(contact, $event)"
@@ -239,77 +239,33 @@
                 @contextmenu.prevent
                 :class="{ armed: armedContactId === contact.id }"
               >
-                <!-- Mobile: no single-tap edit; use long-press or drawer -->
+                <!-- Use same structure as tablet -->
                 <div class="contact-name">
-                  <template v-if="isCellEditing(contact, 'name')">
-                    <input
-                      class="inline-input"
-                      v-model="editBuffer"
-                      autofocus
-                      @keyup.enter="commitEdit(contact, 'name')"
-                      @keyup.esc="cancelEdit"
-                      @blur="commitEdit(contact, 'name')"
-                    />
-                  </template>
-                  <template v-else>
-                    <span v-html="highlight(contact.name)"></span>
-                  </template>
+                  {{ contact.name || 'Unnamed contact' }}
                 </div>
                 <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
-                  <template v-if="isCellEditing(contact, 'hostel_name')">
-                    <input
-                      class="inline-input"
-                      v-model="editBuffer"
-                      autofocus
-                      @keyup.enter="commitEdit(contact, 'hostel_name')"
-                      @keyup.esc="cancelEdit"
-                      @blur="commitEdit(contact, 'hostel_name')"
-                    />
-                  </template>
-                  <template v-else>
-                    <span v-html="highlight(contact.hostel_name || 'No hostel')"></span>
-                  </template>
-                </div>
-                <div class="contact-date-notes mobile">
-                  <span class="contact-date">
-                    <template v-if="isCellEditing(contact, 'next_visit_at')">
-                      <input type="date" class="inline-input date" v-model="editBufferDate" />
-                      <input type="time" class="inline-input time" v-model="editBufferTime" />
-                      <button class="inline-save" @click.stop="commitEdit(contact, 'next_visit_at')">Save</button>
-                    </template>
-                    <template v-else>
-                      <span v-if="contact.next_visit_at">{{ formatDate(contact.next_visit_at) }}</span>
-                    </template>
-                  </span>
-                  <span class="contact-notes mobile">
-                    <template v-if="isCellEditing(contact, 'notes')">
-                      <input
-                        class="inline-input"
-                        v-model="editBuffer"
-                        autofocus
-                        @keyup.enter="commitEdit(contact, 'notes')"
-                        @keyup.esc="cancelEdit"
-                        @blur="commitEdit(contact, 'notes')"
-                      />
-                    </template>
-                    <template v-else>
-                      <span v-if="contact.notes">{{ contact.notes }}</span>
-                    </template>
+                  <span>{{ contact.hostel_name || 'No hostel' }}</span>
+                  <span v-if="contact.location_detail" class="location-detail">
+                    · {{ contact.location_detail }}
                   </span>
                 </div>
-                
+                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes">
+                  <span class="contact-date" v-if="contact.next_visit_at">
+                    {{ formatDate(contact.next_visit_at) }}
+                  </span>
+                  <span class="contact-notes" v-if="contact.notes">
+                    {{ contact.notes }}
+                  </span>
+                </div>
               </div>
               
-              <!-- Add contact button for each bucket -->
-              <button 
-                class="add-contact-btn mobile"
-                @click="openAddContactDrawer(bucket)"
-              >
-                + Add Contact
-              </button>
+              <!-- End-of-list indicator (mobile) - only show if bucket has many contacts -->
+              <div v-if="getBucketContacts(bucket).length > 5" class="end-of-list" aria-hidden="true">End of list</div>
+              <!-- per-bucket add removed (now in header) -->
             </div>
           </div>
         </div>
+      </div>
       </div>
     </div>
 
@@ -322,9 +278,31 @@
       @close="closeDrawer"
       @save="handleSaveContact"
       @delete="handleDeleteContact"
+      @archive="handleArchiveContact"
       @toggle-edit="switchToEdit"
       @move="handleMoveDay"
     />
+    <!-- Phone action sheet -->
+    <div v-if="actionSheetVisible" class="move-sheet-overlay" @click="closeActionSheet">
+      <div class="move-sheet" @click.stop>
+        <h4>Contact Actions</h4>
+        <div class="action-sheet-buttons">
+          <button class="action-sheet-btn" @click="showMoveSheet">
+            <span class="action-icon">↔️</span>
+            Move to another day
+          </button>
+          <button class="action-sheet-btn" @click="archivePendingContact">
+            <span class="action-icon">📥</span>
+            Archive
+          </button>
+          <button class="action-sheet-btn danger" @click="deletePendingContact">
+            <span class="action-icon">❌</span>
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+    
     <!-- Phone move sheet -->
     <div v-if="moveSheetVisible" class="move-sheet-overlay" @click="closeMoveSheet">
       <div class="move-sheet" @click.stop>
@@ -361,7 +339,7 @@ export default {
     const isTouchDevice = ref(false)
     const selectedBucket = ref('')
     const columnsContainer = ref(null)
-    const chipsExpanded = ref(true)
+    const chipsExpanded = ref(false)
     const chipRow1 = computed(() => ['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'])
     const chipRow2 = computed(() => ['Flexible','NotAtHomes','Others'])
     const selectMobileDay = (bucket) => {
@@ -373,7 +351,9 @@ export default {
       } else if (columnsContainer.value) {
         const el = columnsContainer.value.querySelector(`[data-bucket="${bucket}"]`)
         if (el) {
-          el.scrollIntoView({ behavior: 'smooth', inline: 'start', block: 'nearest' })
+          const container = columnsContainer.value
+          const targetLeft = el.offsetLeft - 4
+          container.scrollTo({ left: targetLeft, behavior: 'smooth' })
         }
       }
     }
@@ -435,7 +415,7 @@ export default {
         if (!movedBeyondThreshold.value) {
           if (isPhone.value) {
             pendingMoveContact.value = contact
-            moveSheetVisible.value = true
+            actionSheetVisible.value = true
             longPressTriggered.value = true
           } else {
             openContactDrawerView(contact)
@@ -474,6 +454,7 @@ export default {
         // Skip peek if we just did a long-press action
         return
       }
+      // Show armed state on all devices (visual feedback only, no peek button)
       armedContactId.value = contact.id
       clearTimeout(armTimeout)
       armTimeout = setTimeout(() => { armedContactId.value = null }, 2500)
@@ -531,8 +512,8 @@ export default {
     // Check if mobile
     const checkMobile = () => {
       const w = window.innerWidth
-      isMobile.value = w <= 1024
       isPhone.value = w <= 600
+      isMobile.value = w <= 1024
     }
 
     // Always show chips (requested), they wrap nicely on wide screens
@@ -569,9 +550,9 @@ export default {
     const sortField = ref('manual')
     const sortDir = ref('asc')
 
-    // Get contacts for a specific bucket
+    // Get contacts for a specific bucket (exclude archived)
     const getBucketContacts = (bucket) => {
-      let list = contacts.value.filter(contact => contact.bucket === bucket)
+      let list = contacts.value.filter(contact => contact.bucket === bucket && !contact.archived)
 
       // Search by name or hostel (AND with tag filters)
       if (searchQuery.value) {
@@ -649,12 +630,48 @@ export default {
       }
     }
 
-    // Move sheet state (phones)
+    // Action sheet and move sheet state (phones)
+    const actionSheetVisible = ref(false)
     const moveSheetVisible = ref(false)
     const pendingMoveContact = ref(null)
+    
+    const closeActionSheet = () => {
+      actionSheetVisible.value = false
+      if (!moveSheetVisible.value) {
+        pendingMoveContact.value = null
+      }
+    }
+    
     const closeMoveSheet = () => {
       moveSheetVisible.value = false
       pendingMoveContact.value = null
+    }
+    
+    const showMoveSheet = () => {
+      actionSheetVisible.value = false
+      moveSheetVisible.value = true
+    }
+    
+    const archivePendingContact = async () => {
+      if (!pendingMoveContact.value) return
+      try {
+        await updateContact(pendingMoveContact.value.id, { archived: true })
+        // Trigger refresh to update archived count
+        window.dispatchEvent(new CustomEvent('rv:refresh'))
+      } finally {
+        closeActionSheet()
+      }
+    }
+    
+    const deletePendingContact = async () => {
+      if (!pendingMoveContact.value) return
+      if (confirm('Are you sure you want to delete this contact?')) {
+        try {
+          await deleteContact(pendingMoveContact.value.id)
+        } finally {
+          closeActionSheet()
+        }
+      }
     }
     const handleMoveDayFromSheet = async (bucket) => {
       if (!pendingMoveContact.value) return
@@ -672,11 +689,13 @@ export default {
     // Mobile carousel navigation
     const getVisibleBuckets = () => {
       if (isMobile.value) {
+        // Ensure single column view fills height and remains readable
         if (!selectedBucket.value) {
           selectedBucket.value = BUCKETS[carouselIndex.value]
         }
         return [selectedBucket.value]
       }
+      // Two columns for tablet/desktop keeps columns wider and readable
       return BUCKETS.slice(carouselIndex.value, carouselIndex.value + 2)
     }
 
@@ -878,6 +897,22 @@ export default {
       } catch (error) {
         console.error('Error deleting contact:', error)
         alert('Error deleting contact. Please try again.')
+      } finally {
+        saving.value = false
+      }
+    }
+    
+    // Handle archive contact (from drawer)
+    const handleArchiveContact = async (contactId) => {
+      saving.value = true
+      try {
+        await updateContact(contactId, { archived: true })
+        closeDrawer()
+        // Trigger refresh to update archived count
+        window.dispatchEvent(new CustomEvent('rv:refresh'))
+      } catch (error) {
+        console.error('Error archiving contact:', error)
+        alert('Error archiving contact. Please try again.')
       } finally {
         saving.value = false
       }
@@ -1298,10 +1333,16 @@ export default {
         getSpecialLabel,
         handleSaveContact,
         handleDeleteContact,
-        // Move sheet
+        handleArchiveContact,
+        // Action sheet and move sheet
+        actionSheetVisible,
         moveSheetVisible,
+        closeActionSheet,
         closeMoveSheet,
+        showMoveSheet,
         handleMoveDayFromSheet,
+        archivePendingContact,
+        deletePendingContact,
         
         // Drag and drop methods
         handleDragStart,
@@ -1365,6 +1406,8 @@ export default {
   height: 100%;
   display: flex;
   flex-direction: column;
+  padding: 1rem;
+  box-sizing: border-box;
 }
 
 /* Mobile carousel navigation */
@@ -1378,7 +1421,7 @@ export default {
 }
 
 .mobile-day-chips { padding: 0.35rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; }
-.chips-row { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+.chips-row { display: flex; gap: 0.25rem; flex-wrap: wrap; justify-content: center; }
 .chip {
   padding: 0.22rem 0.5rem;
   border: 1px solid var(--border-color);
@@ -1389,7 +1432,17 @@ export default {
 }
 .chip.active { background: var(--primary-color); color: #fff; border-color: var(--primary-color); }
 
-.chips-collapsible { padding: 0 0.75rem; }
+.chip.special {
+  border-color: #e0ecfb;
+  background: #eaf3ff;
+  color: #1f6fb2;
+}
+.chip.special.active { background: #3498db; color: #fff; border-color: #3498db; }
+
+.chips-collapsible { 
+  padding: 0 0.75rem; 
+  overflow: hidden; /* Don't let expanded content push layout */
+}
 .chips-toggle {
   margin: 0.25rem 0 0.1rem 0;
   padding: 0.25rem 0.5rem;
@@ -1399,7 +1452,14 @@ export default {
   border-radius: 6px;
   cursor: pointer;
 }
-.chips-toggle .chev { display: inline-block; transition: transform 0.2s ease; }
+.chips-toggle.full-width {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center; /* center the Days toggle */
+  gap: 0.15rem; /* bring chevron closer */
+}
+.chips-toggle .chev { display: inline-block; transition: transform 0.2s ease; margin-left: 0.15rem; }
 .chips-toggle .chev.open { transform: rotate(180deg); }
 
 /* Extra-tight chips on small phones */
@@ -1493,8 +1553,11 @@ export default {
   flex: 1;
   overflow: hidden;
   position: relative;
-  touch-action: pan-y; /* Allow vertical scrolling but handle horizontal ourselves */
-  user-select: none; /* Prevent text selection during swipes */
+  touch-action: pan-y;
+  user-select: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .mobile-carousel-columns {
@@ -1518,6 +1581,8 @@ export default {
   border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  height: calc(100% - 1rem); /* Account for padding */
+  overflow: hidden;
 }
 
 .mobile-bucket-header {
@@ -1544,16 +1609,33 @@ export default {
 
 .mobile-contacts-in-bucket {
   flex: 1;
-  padding: 0.5rem;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
+  padding: 0.25rem 0.25rem 2rem 0.25rem; /* Increased bottom padding */
+  overflow-y: scroll; /* Force scroll always */
+  overflow-x: hidden;
+  display: block; /* Change from flex to block */
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  scrollbar-width: thin;
+  overscroll-behavior: contain;
 }
 
 .grid-container {
   flex: 1;
-  overflow: auto;
+  overflow: hidden; /* prevent whole content from scrolling */
+  display: grid;
+  grid-template-rows: auto auto 1fr; /* controls, (mobile) days, contacts viewport */
+  height: 100%;
+  min-height: 0;
+}
+.contacts-scroll {
+  grid-row: 3; /* Explicitly place in the third row */
+  min-height: 0; /* allow child to size for overflow */
+  overflow-x: auto; /* allow horizontal scroll of columns */
+  overflow-y: hidden; /* prevent vertical scroll; buckets will scroll */
+  height: 100%; /* Take full height of its grid row */
+  display: flex;
+  flex-direction: column;
 }
 
 .grid-toolbar {
@@ -1563,20 +1645,43 @@ export default {
   padding: 0.5rem 0.75rem;
 }
 
+.controls-card {
+  background: transparent; /* remove inner rectangle */
+  border: none;
+  border-radius: 0;
+  padding: 0; /* no extra padding around inputs */
+  margin: 0 0.5rem 0.25rem 0.5rem;
+}
+
+.controls-panel {
+  background: #eef5fb;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  margin: 0.35rem 0.35rem 0.4rem 0.35rem; /* ~30% smaller margins */
+  padding: 0.4rem 0.35rem 0.35rem 0.35rem; /* ~30% smaller padding */
+}
+
+.top-add-row { display: flex; justify-content: center; margin-bottom: 0.5rem; }
+.add-top-btn { padding: 0.45rem 0.9rem; border-radius: 8px; }
+
 .search-wrap { display: flex; align-items: center; gap: 0.5rem; flex: 1; }
 .search-input {
   width: 100%;
-  max-width: 360px;
-  padding: 0.45rem 0.6rem;
+  max-width: 200px; /* trimmed further */
+  padding: 0.18rem 0.48rem; /* tighter height */
   border: 1px solid var(--border-color);
   border-radius: 6px;
+  font-size: 0.95rem;
+  line-height: 1.05;
 }
+.search-input::placeholder { text-align: center; }
+.search-input:placeholder-shown { text-align: center; }
 .search-count { font-size: 0.85rem; color: #666; }
 mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 
 .toolbar-actions { position: relative; }
 .filter-btn {
-  padding: 0.4rem 0.75rem;
+  padding: 0.3rem 0.6rem; /* match search height */
   border: 1px solid var(--border-color);
   background: white;
   color: var(--text-color);
@@ -1647,6 +1752,8 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   min-width: max-content;
   /* Smooth scrolling */
   scroll-behavior: smooth;
+  height: 100%;
+  min-height: 0;
 }
 
 /* Hide scrollbar on webkit browsers for cleaner look */
@@ -1668,12 +1775,39 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   background: var(--primary-color);
 }
 
+/* section-divider removed */
+
+/* Mobile-specific scroll fixes */
+@media (max-width: 768px) {
+  /* Force scrollbar to be visible */
+  .mobile-contacts-in-bucket::-webkit-scrollbar {
+    width: 8px !important;
+    height: 8px !important;
+  }
+  
+  .mobile-contacts-in-bucket::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1) !important;
+    border-radius: 4px !important;
+  }
+  
+  .mobile-contacts-in-bucket::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.3) !important;
+    border-radius: 4px !important;
+  }
+  
+  .mobile-contacts-in-bucket::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.5) !important;
+  }
+}
+
 .bucket-column {
   min-width: 160px;
   max-width: 180px;
   background-color: var(--cell-background-color);
   border-radius: 4px;
   border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
 }
 
 .bucket-header {
@@ -1686,6 +1820,8 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   align-items: center;
   min-height: 36px;
 }
+.add-icon-btn { border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.15); color: #fff; padding: 0.1rem 0.35rem; border-radius: 6px; font-weight: 700; }
+.add-icon-btn:hover { background: rgba(255,255,255,0.3); }
 
 .bucket-header h3 {
   margin: 0;
@@ -1702,10 +1838,27 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 }
 
 .contacts-in-bucket {
-  padding: 0.25rem;
-  min-height: 150px;
-  max-height: 400px;
+  padding: 0.25rem 0.25rem 2rem 0.25rem; /* Increased bottom padding */
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
+}
+
+/* Ensure last contact is fully visible */
+.contacts-in-bucket::after,
+.mobile-contacts-in-bucket::after {
+  content: '';
+  display: block;
+  height: 1.5rem; /* Increased extra space after last contact */
+  width: 100%;
+}
+
+.end-of-list {
+  text-align: center;
+  color: #98a6b3;
+  font-size: 0.75rem;
+  padding: 0.5rem 0 1rem 0;
+  margin-top: 0.5rem;
 }
 
 .contact-cell {
@@ -1724,8 +1877,21 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 
 /* Peek/armed styling */
 .contact-cell.armed {
-  outline: 2px solid var(--primary-color);
+  outline: 3px solid var(--primary-color);
+  outline-offset: -1px;
   position: relative;
+  animation: pulseOutline 0.3s ease-out;
+}
+
+@keyframes pulseOutline {
+  0% {
+    outline-width: 1px;
+    outline-offset: 0;
+  }
+  100% {
+    outline-width: 3px;
+    outline-offset: -1px;
+  }
 }
 
 .peek-actions {
@@ -1768,15 +1934,7 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.contact-cell.mobile {
-  padding: 0.75rem;
-  margin-bottom: 0;
-  border-radius: 6px;
-  background-color: white;
-  border: 1px solid var(--border-color);
-  cursor: default; /* prevent grab cursor on mobile */
-  transition: all 0.2s ease;
-}
+/* Removed separate mobile styling - use same as tablet */
 
 /* Phone move sheet */
 .move-sheet-overlay {
@@ -1798,13 +1956,48 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 }
 .move-sheet h4 {
   margin: 0 0 0.5rem 0;
+  color: var(--text-color);
 }
 
-.contact-cell.mobile:hover {
-  border-color: var(--primary-color);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  transform: translateY(-1px);
+.action-sheet-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
+
+.action-sheet-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: white;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  font-size: 1rem;
+  text-align: left;
+  color: var(--text-color);
+  transition: all 0.2s ease;
+  cursor: pointer;
+}
+
+.action-sheet-btn:hover {
+  background: #f5f5f5;
+}
+
+.action-sheet-btn.danger {
+  color: #d32f2f;
+  border-color: #ffcdd2;
+}
+
+.action-sheet-btn.danger:hover {
+  background: #ffebee;
+}
+
+.action-icon {
+  font-size: 1.2rem;
+}
+
+/* Mobile uses same hover as tablet */
 
 .contact-name {
   font-weight: 600;
@@ -1816,6 +2009,7 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Mobile uses same text styling as tablet */
 
 .contact-hostel {
   font-size: 0.75rem;
@@ -1833,6 +2027,14 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   max-width: 100%;
   width: fit-content;
 }
+
+.location-detail {
+  color: #7a8b9c;
+  font-size: 0.7rem;
+  font-style: italic;
+  margin-left: 0.2rem;
+}
+/* Mobile uses same hostel styling as tablet */
 
 .contact-date-notes {
   display: flex;

@@ -51,9 +51,32 @@ class ReturnVisitDatabase extends Dexie {
       await Promise.all(updates)
     })
 
+    // Version 4: Monthly ministry reports (aggregate minutes + studies per month)
+    this.version(4).stores({
+      contacts: '++id, remote_uuid, name, phone, bucket, next_visit_at, hostel_name, location_detail, last_outcome, notes, tags, display_order, updated_at',
+      backupMeta: '++id, last_synced_at, remote_id',
+      monthlyReports: '++id, remote_uuid, year, month, total_minutes, studies_count, updated_at'
+    }).upgrade(async tx => {
+      // nothing to migrate
+      return
+    })
+
+    // Version 5: Add archived field for contacts
+    this.version(5).stores({
+      contacts: '++id, remote_uuid, name, phone, bucket, next_visit_at, hostel_name, location_detail, last_outcome, notes, tags, display_order, updated_at, archived',
+      backupMeta: '++id, last_synced_at, remote_id',
+      monthlyReports: '++id, remote_uuid, year, month, total_minutes, studies_count, updated_at'
+    }).upgrade(async tx => {
+      // Set archived to false for all existing contacts
+      const contacts = await tx.table('contacts').toArray()
+      const updates = contacts.map(c => tx.table('contacts').update(c.id, { archived: false }))
+      await Promise.all(updates)
+    })
+
     // Define the Contact table
     this.contacts = this.table('contacts')
     this.backupMeta = this.table('backupMeta')
+    this.monthlyReports = this.table('monthlyReports')
   }
 }
 
@@ -87,7 +110,8 @@ export const contactService = {
         display_order: nextDisplayOrder,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        remote_uuid: contact.remote_uuid || null
+        remote_uuid: contact.remote_uuid || null,
+        archived: false
       })
       return await db.contacts.get(id)
     } catch (error) {
@@ -160,6 +184,50 @@ export const contactService = {
       console.error('Error getting today\'s visits:', error)
       throw error
     }
+  }
+}
+
+// Ministry Reports (monthly aggregates)
+export const reportService = {
+  async getReport(year, month) {
+    return await db.monthlyReports.where({ year, month }).first()
+  },
+
+  async saveReport({ year, month, total_minutes, studies_count }) {
+    const existing = await db.monthlyReports.where({ year, month }).first()
+    const nowIso = new Date().toISOString()
+    if (existing) {
+      await db.monthlyReports.update(existing.id, {
+        total_minutes: Math.max(total_minutes || 0, 0),
+        studies_count: Math.max(studies_count || 0, 0),
+        updated_at: nowIso
+      })
+      return await db.monthlyReports.get(existing.id)
+    } else {
+      const id = await db.monthlyReports.add({
+        year,
+        month,
+        total_minutes: Math.max(total_minutes || 0, 0),
+        studies_count: Math.max(studies_count || 0, 0),
+        updated_at: nowIso,
+        remote_uuid: null
+      })
+      return await db.monthlyReports.get(id)
+    }
+  },
+
+  async getServiceYear(yearStart) {
+    // Service year: Sep (8) .. Dec (11) of yearStart, then Jan (0)..Aug (7) of yearStart+1
+    const first = await db.monthlyReports.where('year').equals(yearStart).and(r => r.month >= 8).toArray()
+    const second = await db.monthlyReports.where('year').equals(yearStart + 1).and(r => r.month <= 7).toArray()
+    const map = new Map()
+    ;[...first, ...second].forEach(r => {
+      map.set(`${r.year}-${r.month}`, r)
+    })
+    const months = []
+    for (let m = 8; m <= 11; m++) months.push({ year: yearStart, month: m, report: map.get(`${yearStart}-${m}`) || null })
+    for (let m = 0; m <= 7; m++) months.push({ year: yearStart + 1, month: m, report: map.get(`${yearStart + 1}-${m}`) || null })
+    return months
   }
 }
 

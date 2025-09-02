@@ -8,7 +8,10 @@
         <div class="header-center">
           <nav class="app-nav compact">
             <router-link to="/" class="tab-link" :class="{ active: $route.name === 'Home' }" title="Contacts">
-              📋 <span class="tab-text">Contacts</span>
+              <svg class="tab-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M12 12c2.761 0 5-2.686 5-6s-2.239-6-5-6-5 2.686-5 6 2.239 6 5 6zm0 2c-4.418 0-8 3.134-8 7v1h16v-1c0-3.866-3.582-7-8-7z"/>
+              </svg>
+              <span class="tab-text">Contacts</span>
             </router-link>
             <router-link to="/agenda" class="tab-link" :class="{ active: $route.name === 'Agenda' }" title="Today's Agenda">
               📅 <span class="tab-text">Today</span>
@@ -17,36 +20,49 @@
         </div>
         <div class="header-right">
           <button
-            class="icon-btn"
+            class="icon-btn refresh-btn"
             @click="refreshNow"
             :title="isRefreshing ? 'Refreshing…' : 'Refresh'"
             aria-label="Refresh"
             :aria-busy="isRefreshing ? 'true' : 'false'"
             :disabled="isRefreshing"
           >
-            <span v-if="!isRefreshing">🔄</span>
-            <span v-else class="spinner">🔄</span>
+            <span v-if="!isRefreshing" class="refresh-icon" aria-hidden="true">
+              <svg class="svg-icon" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M12 6V3L8 7l4 4V8c2.757 0 5 2.243 5 5 0 1.061-.336 2.043-.904 2.846l1.518 1.318C18.429 16.112 19 14.626 19 13c0-3.866-3.134-7-7-7zm-5 6c0-1.061.336-2.043.904-2.846L6.386 7.836C5.571 9.888 5 11.374 5 13c0 3.866 3.134 7 7 7v3l4-4-4-4v3c-2.757 0-5-2.243-5-5z"/>
+              </svg>
+            </span>
+            <span v-else class="refresh-icon spinner" aria-hidden="true">
+              <svg class="svg-icon" viewBox="0 0 24 24">
+                <path fill="currentColor" d="M12 6V3L8 7l4 4V8c2.757 0 5 2.243 5 5 0 1.061-.336 2.043-.904 2.846l1.518 1.318C18.429 16.112 19 14.626 19 13c0-3.866-3.134-7-7-7zm-5 6c0-1.061.336-2.043.904-2.846L6.386 7.836C5.571 9.888 5 11.374 5 13c0 3.866 3.134 7 7 7v3l4-4-4-4v3c-2.757 0-5-2.243-5-5z"/>
+              </svg>
+            </span>
           </button>
-          <SettingsMenu />
+          <button class="icon-btn" @click="drawerOpen = true" title="Menu" aria-label="Menu">☰</button>
         </div>
       </div>
     </header>
     
     <main class="app-main">
-      <router-view />
+      <div @touchstart.passive="onEdgeTouchStart" @touchend.passive="onEdgeTouchEnd" style="height:100%">
+        <router-view />
+      </div>
     </main>
+    <SettingsDrawer :open="drawerOpen" @close="drawerOpen=false" @open-report="onOpenReport" />
   </div>
 </template>
 
 <script>
 import SettingsMenu from './components/SettingsMenu.vue'
+import SettingsDrawer from './components/SettingsDrawer.vue'
 import { syncService } from './services/syncService.js'
 export default { 
   name: 'App', 
-  components: { SettingsMenu },
+  components: { SettingsMenu, SettingsDrawer },
   data() {
     return {
-      isRefreshing: false
+      isRefreshing: false,
+      drawerOpen: false
     }
   },
   mounted() {
@@ -74,6 +90,38 @@ export default {
         // Ask composables to reload local data and emit end event
         window.dispatchEvent(new CustomEvent('rv:refresh'))
       }
+    },
+    // Edge-swipe to open drawer on phones only
+    onEdgeTouchStart(e) {
+      const w = window.innerWidth
+      const isPhone = w <= 600
+      if (!isPhone) return
+      const t = e.touches && e.touches[0]
+      if (!t) return
+      // Only if starting near the very left edge
+      if (t.clientX <= 16) {
+        this._edgeStartX = t.clientX
+        this._edgeStartY = t.clientY
+      } else {
+        this._edgeStartX = 0
+        this._edgeStartY = 0
+      }
+    },
+    onEdgeTouchEnd(e) {
+      if (!this._edgeStartX && !this._edgeStartY) return
+      const t = e.changedTouches && e.changedTouches[0]
+      if (!t) return
+      const dx = t.clientX - this._edgeStartX
+      const dy = Math.abs(t.clientY - this._edgeStartY)
+      this._edgeStartX = 0
+      this._edgeStartY = 0
+      if (dx > 60 && dx > dy) {
+        this.drawerOpen = true
+      }
+    },
+    onOpenReport() {
+      // Placeholder: we will navigate/open the report modal later
+      alert("Month's report coming soon")
     }
   }
 }
@@ -83,7 +131,7 @@ export default {
 .app-header {
   background-color: var(--header-background-color);
   color: var(--text-color);
-  padding: 0.5rem 0.75rem;
+  padding: 0.75rem 0.9rem;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -99,6 +147,7 @@ export default {
 .app-nav.compact { gap: 0.4rem; }
 
 .tab-link { padding: 0.35rem 0.6rem; background-color: rgba(255, 255, 255, 0.12); color: white; text-decoration: none; border-radius: 8px; font-weight: 500; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 0.35rem; }
+.tab-link .tab-icon { width: 18px; height: 18px; color: #3498db; }
 .tab-link .tab-text { display: inline; }
 .tab-link:hover { background-color: rgba(255, 255, 255, 0.2); }
 .tab-link.active { background-color: white; color: var(--header-background-color); border-color: var(--primary-color); }
@@ -107,9 +156,12 @@ export default {
 
 .app-main {
   flex: 1;
-  padding: 1rem;
+  padding: 0; /* Remove padding that reduces height */
   max-width: 100%;
-  overflow: hidden;
+  overflow: hidden; /* lock vertical scroll at app level */
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 #app {
@@ -119,6 +171,8 @@ export default {
 }
 
 .icon-btn { padding: 0.35rem 0.5rem; background: white; color: var(--header-background-color); border: 1px solid var(--primary-color); border-radius: 8px; line-height: 1; }
+.icon-btn .svg-icon { width: 18px; height: 18px; display: inline-block; color: #3498db; }
+.refresh-icon { display: inline-flex; align-items: center; }
 .icon-btn:hover { background: var(--primary-color); color: #fff; }
 .icon-btn:disabled { opacity: 0.8; cursor: not-allowed; }
 
@@ -127,4 +181,9 @@ export default {
   to { transform: rotate(360deg); }
 }
 .icon-btn .spinner { display: inline-block; animation: rvspin 0.9s linear infinite; }
+
+/* Hide refresh icon on phone and tablet; show on desktop */
+@media (max-width: 1024px) {
+  .refresh-btn { display: none; }
+}
 </style> 

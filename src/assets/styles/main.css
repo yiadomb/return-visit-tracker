@@ -34,6 +34,14 @@ body {
   line-height: 1.6;
 }
 
+/* Lock global vertical scroll; the app manages its own scroll areas */
+html, body, #app {
+  height: 100svh; /* small viewport for mobile toolbars */
+  height: 100dvh; /* dynamic viewport (fallback chain) */
+  height: 100vh;  /* legacy */
+  overflow-y: hidden; /* lock vertical page scroll */
+}
+
 /* Button Styles */
 button {
   background-color: var(--primary-color);

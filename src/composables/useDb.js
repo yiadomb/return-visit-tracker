@@ -42,7 +42,6 @@ export function useContacts() {
     error.value = null
     try {
       const newContact = await contactService.create(contactData)
-      contacts.value.push(newContact)
       // Trigger cloud sync (non-blocking)
       syncService.syncAll().catch(err => console.warn('Sync after add failed:', err))
       

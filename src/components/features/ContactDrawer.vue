@@ -186,6 +186,14 @@
             </a>
             <button 
               type="button" 
+              @click="$emit('archive', contact.id)"
+              class="action-btn archive"
+              v-if="contact.id"
+            >
+              📥 Archive
+            </button>
+            <button 
+              type="button" 
               @click="$emit('delete', contact.id)"
               class="action-btn delete"
               v-if="contact.id"
@@ -219,7 +227,7 @@ export default {
       default: false
     }
   },
-  emits: ['close', 'save', 'delete'],
+  emits: ['close', 'save', 'delete', 'archive'],
   setup(props, { emit }) {
     const mode = computed(() => {
       if (props.isEditing) return 'edit'
@@ -326,6 +334,11 @@ export default {
     // Handle form submission
     const handleSubmit = () => {
       if (!validateForm()) {
+        // Scroll to first error field
+        const firstError = document.querySelector('.form-group .error')
+        if (firstError) {
+          firstError.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
         return
       }
 
@@ -405,8 +418,10 @@ export default {
   width: 100%;
   max-width: 440px;
   max-height: 88vh;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
 }
 
 .drawer-header {
@@ -437,7 +452,14 @@ export default {
   color: var(--text-color);
 }
 
-.contact-form { padding: 1rem 1.1rem; }
+.contact-form {
+  padding: 1rem 1.1rem;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 
 .form-group { margin-bottom: 0.75rem; }
 
@@ -521,9 +543,13 @@ export default {
 .form-actions {
   display: flex;
   gap: 1rem;
-  margin-top: 1.25rem;
-  padding-top: 0.75rem;
+  margin-top: auto;
+  padding: 1rem 0 0.5rem 0;
   border-top: 1px solid var(--border-color);
+  background-color: var(--background-color);
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
 }
 
 .btn-primary, .btn-secondary {
@@ -598,6 +624,11 @@ export default {
 
 .action-btn.whatsapp {
   background-color: #25d366;
+  color: white;
+}
+
+.action-btn.archive {
+  background-color: #3498db;
   color: white;
 }
 
