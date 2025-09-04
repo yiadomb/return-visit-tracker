@@ -200,7 +200,7 @@ export function useNotifications() {
     }, 5000)
   }
 
-  // Schedule daily reminder for visits
+  // Schedule daily reminder for visits (legacy)
   const scheduleDailyReminder = async (time = '07:00') => {
     const [hours, minutes] = time.split(':').map(Number)
     
@@ -216,6 +216,42 @@ export function useNotifications() {
       extra: {
         type: 'daily_reminder'
       }
+    })
+  }
+
+  // Schedule weekly reminder for specific weekday
+  const scheduleWeeklyReminder = async (options) => {
+    const { id, title, body, schedule, extra } = options
+    const [hours, minutes] = schedule.time.split(':').map(Number)
+    
+    // Create a date for next occurrence of this weekday
+    const now = new Date()
+    const targetDay = schedule.weekday
+    const currentDay = now.getDay()
+    
+    let daysUntilTarget = (targetDay - currentDay + 7) % 7
+    if (daysUntilTarget === 0) {
+      // If it's the same day, schedule for next week unless it's before the target time
+      const targetTime = new Date()
+      targetTime.setHours(hours, minutes, 0, 0)
+      if (now >= targetTime) {
+        daysUntilTarget = 7
+      }
+    }
+    
+    const nextOccurrence = new Date(now.getTime() + daysUntilTarget * 24 * 60 * 60 * 1000)
+    nextOccurrence.setHours(hours, minutes, 0, 0)
+    
+    await scheduleNotification({
+      id,
+      title,
+      body,
+      schedule: {
+        repeats: true,
+        every: 'week',
+        at: nextOccurrence
+      },
+      extra
     })
   }
 
@@ -306,6 +342,7 @@ export function useNotifications() {
     checkPermissions,
     scheduleNotification,
     scheduleDailyReminder,
+    scheduleWeeklyReminder,
     scheduleVisitReminder,
     cancelNotification,
     getPendingNotifications

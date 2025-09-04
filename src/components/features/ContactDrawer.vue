@@ -74,7 +74,7 @@
             id="phone"
             v-model="formData.phone"
             type="tel"
-            placeholder="0244444444"
+            placeholder="0555000000"
             pattern="[0-9]{10}"
             autocomplete="off"
             :class="{ 'error': errors.phone }"
@@ -104,24 +104,35 @@
         <div class="form-group">
           <label for="next_visit_at">Next Visit</label>
           <div class="datetime-inputs">
-            <input
-              id="next_visit_at"
-              v-model="formData.next_visit_date"
-              type="date"
-              :min="today"
-              class="date-input"
-              :readonly="mode === 'view'"
-              :disabled="mode === 'view'"
-            />
-            <input
-              id="next_visit_time"
-              v-model="formData.next_visit_time"
-              type="time"
-              class="time-input"
-              :readonly="mode === 'view'"
-              :disabled="mode === 'view'"
-            />
+            <div class="date-wrapper">
+              <input
+                id="next_visit_at"
+                v-model="formData.next_visit_date"
+                type="date"
+                :min="today"
+                class="date-input"
+                :readonly="mode === 'view'"
+                :disabled="mode === 'view'"
+                title="Choose return visit date"
+              />
+              <span v-if="!formData.next_visit_date" class="date-placeholder">📅 Date</span>
+            </div>
+            <div class="time-wrapper">
+              <input
+                id="next_visit_time"
+                v-model="formData.next_visit_time"
+                type="time"
+                class="time-input"
+                :readonly="mode === 'view'"
+                :disabled="mode === 'view'"
+                title="Choose return visit time"
+                @focus="onTimeFocus"
+                @blur="onTimeBlur"
+              />
+              <span v-if="!formData.next_visit_time" class="time-placeholder">🕐 Time</span>
+            </div>
           </div>
+          <small class="field-hint">When do you plan to visit again?</small>
           <label class="remind-toggle">
             <input type="checkbox" v-model="remindMe" />
             Remind me
@@ -143,26 +154,6 @@
               </button>
             </div>
           </div>
-        </div>
-
-        <!-- Action Buttons -->
-        <div class="form-actions">
-          <template v-if="mode === 'view'">
-            <button type="button" @click="$emit('close')" class="btn-secondary">
-              Close
-            </button>
-            <button type="button" class="btn-primary" @click="$emit('toggle-edit')">
-              Edit
-            </button>
-          </template>
-          <template v-else>
-            <button type="button" @click="$emit('close')" class="btn-secondary">
-              Cancel
-            </button>
-            <button type="submit" class="btn-primary" :disabled="loading">
-              {{ loading ? 'Saving...' : (isEditing ? 'Update' : 'Add') }} Contact
-            </button>
-          </template>
         </div>
 
         <!-- Quick Actions (for editing only) -->
@@ -203,6 +194,26 @@
           </div>
         </div>
       </form>
+
+      <!-- Footer actions outside the scroll area to stay visible with keyboard -->
+      <div class="sheet-footer">
+        <template v-if="mode === 'view'">
+          <button type="button" class="btn-primary action-primary" @click="$emit('toggle-edit')">
+            Edit
+          </button>
+          <button type="button" @click="$emit('close')" class="btn-secondary action-cancel">
+            Close
+          </button>
+        </template>
+        <template v-else>
+          <button type="button" class="btn-primary action-primary" :disabled="loading" @click="handleSubmit">
+            {{ loading ? 'Saving...' : (mode === 'edit' ? 'Update Contact' : 'Save Contact') }}
+          </button>
+          <button type="button" @click="$emit('close')" class="btn-secondary action-cancel">
+            Cancel
+          </button>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -256,6 +267,8 @@ export default {
     const showTagMenu = ref(false)
     const bucketSelectRef = ref(null)
     const tagSelectRef = ref(null)
+
+    // Removed tablet custom menu; restore native time input everywhere
 
     const chooseBucket = (bucket) => {
       formData.bucket = bucket
@@ -353,11 +366,14 @@ export default {
       if (contactData.next_visit_date) {
         if (contactData.next_visit_time) {
           contactData.next_visit_at = `${contactData.next_visit_date}T${contactData.next_visit_time}`
+          contactData.time_explicitly_set = true
         } else {
           contactData.next_visit_at = `${contactData.next_visit_date}T10:00`
+          contactData.time_explicitly_set = false
         }
       } else {
         contactData.next_visit_at = ''
+        contactData.time_explicitly_set = false
       }
 
       delete contactData.next_visit_date
@@ -374,6 +390,14 @@ export default {
       emit('close')
     }
 
+    // Native time picker helpers
+    const onTimeFocus = (event) => {
+      setTimeout(() => {
+        event.target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
+    }
+    const onTimeBlur = () => {}
+
           return {
         mode,
         title,
@@ -389,9 +413,13 @@ export default {
         chooseTag,
         bucketSelectRef,
         tagSelectRef,
+        onTimeFocus,
+        onTimeBlur,
         validateForm,
         handleSubmit,
-        handleOverlayClick
+        handleOverlayClick,
+        onTimeFocus,
+        onTimeBlur
       }
   }
 }
@@ -416,8 +444,8 @@ export default {
   background-color: var(--background-color);
   border-radius: 8px;
   width: 100%;
-  max-width: 440px;
-  max-height: 88vh;
+  max-width: 380px;
+  max-height: 88dvh;
   display: flex;
   flex-direction: column;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
@@ -459,6 +487,9 @@ export default {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  -webkit-overflow-scrolling: touch;
+  /* leave room so last field isn't hidden behind footer */
+  padding-bottom: 5rem;
 }
 
 .form-group { margin-bottom: 0.75rem; }
@@ -532,24 +563,51 @@ export default {
 
 .datetime-inputs { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
-.date-input {
-  flex: 2;
-}
-
-.time-input {
+.date-wrapper, .time-wrapper {
+  position: relative;
   flex: 1;
 }
 
-.form-actions {
+.date-wrapper {
+  flex: 2;
+}
+
+.time-wrapper {
+  flex: 1;
+}
+
+.date-input, .time-input {
+  width: 100%;
+}
+
+.date-placeholder, .time-placeholder {
+  position: absolute;
+  top: 50%;
+  left: 0.65rem;
+  transform: translateY(-50%);
+  color: #999;
+  font-size: 0.9rem;
+  pointer-events: none;
+  z-index: 1;
+  white-space: nowrap;
+}
+
+.time-placeholder {
+  font-size: 0.85rem;
+}
+
+.date-input:focus + .date-placeholder,
+.time-input:focus + .time-placeholder {
+  opacity: 0.5;
+}
+
+.sheet-footer {
   display: flex;
   gap: 1rem;
-  margin-top: auto;
-  padding: 1rem 0 0.5rem 0;
+  padding: 0.75rem 1.1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border-color);
   background-color: var(--background-color);
-  position: sticky;
-  bottom: 0;
-  z-index: 10;
+  z-index: 20;
 }
 
 .btn-primary, .btn-secondary {
@@ -642,6 +700,14 @@ export default {
   transform: translateY(-1px);
 }
 
+.field-hint {
+  display: block;
+  color: #666;
+  font-size: 0.8rem;
+  margin-top: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
 .remind-toggle { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
 .remind-toggle input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--primary-color); }
 
@@ -683,14 +749,29 @@ export default {
 }
 .mini-option:hover { background: var(--cell-background-color); }
 
+/* Button ordering for tablet/desktop - Cancel first, Update Contact second */
+@media (min-width: 769px) {
+  .action-cancel {
+    order: 1;
+  }
+  
+  .action-primary {
+    order: 2;
+  }
+}
+
 /* Mobile responsive */
 @media (max-width: 768px) {
   .drawer-overlay {
     padding: 0.5rem;
+    align-items: flex-end; /* bottom sheet style on mobile */
   }
   
   .drawer-content {
-    max-height: 95vh;
+    max-height: 92dvh;
+    width: 100%;
+    max-width: 600px;
+    border-radius: 14px 14px 0 0;
   }
   
   .drawer-header,
@@ -698,8 +779,19 @@ export default {
     padding: 1rem;
   }
   
-  .form-actions {
+  .sheet-footer {
     flex-direction: column;
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+  
+  /* On mobile, keep original order - Update Contact first, Cancel second */
+  .action-primary {
+    order: 1;
+  }
+  
+  .action-cancel {
+    order: 2;
   }
   
   .action-buttons {

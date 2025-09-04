@@ -1,8 +1,6 @@
 <template>
   <div class="home-view">
-    <div class="toolbar">
-      <button class="btn-small" @click="openAddContactDrawer">Add Contact</button>
-    </div>
+    <!-- Add Contact button moved into ContactGrid controls panel -->
     
     <!-- Loading state -->
     <div v-if="loading" class="loading-state">
@@ -36,7 +34,8 @@ import { syncService } from '../services/syncService.js'
 import { authService } from '../services/authService.js'
 import ContactGrid from '../components/features/ContactGrid.vue'
 import ContactDrawer from '../components/features/ContactDrawer.vue'
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, onMounted as onMountedAlias, nextTick } from 'vue'
+import { usePullToRefresh } from '../composables/usePullToRefresh.js'
 
 export default {
   name: 'HomeView',
@@ -121,6 +120,13 @@ export default {
       } catch (e) {
         console.warn('Initial sync failed', e)
       }
+
+      // Pull-to-refresh on main scroll area
+      await nextTick()
+      const getScrollableEl = () => document.querySelector('.grid-container') || document.querySelector('.home-view')
+      usePullToRefresh(getScrollableEl, async () => {
+        try { window.dispatchEvent(new CustomEvent('rv:refresh')) } catch {}
+      })
     })
     
     return {
@@ -154,6 +160,7 @@ export default {
   gap: 1rem;
   align-items: center;
 }
+.toolbar.centered { justify-content: center; }
 
 .btn-small { padding: 0.4rem 0.7rem; border: 1px solid var(--primary-color); background: var(--primary-color); color: #fff; border-radius: 6px; font-size: 0.9rem; }
 

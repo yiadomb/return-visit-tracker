@@ -30,13 +30,85 @@ class NotificationService {
     }
   }
 
-  // Schedule daily reminder at 7 AM
+  // Schedule smart daily reminders for weekdays with contacts
   async scheduleDailyReminder() {
     try {
-      await this.notifications.scheduleDailyReminder('07:00')
-      console.log('Daily reminder scheduled for 7:00 AM')
+      // Check if daily reminders are enabled
+      const isEnabled = localStorage.getItem('dailyReminderEnabled') === 'true'
+      if (!isEnabled) {
+        console.log('Daily reminders disabled, skipping')
+        return
+      }
+
+      const reminderTime = localStorage.getItem('dailyTime') || '07:00'
+      console.log('Scheduling smart daily reminders for', reminderTime)
+
+      // Clear existing daily reminders first
+      await this.clearDailyReminders()
+
+      // Get all contacts to check which days have contacts
+      const contacts = await contactService.getAll()
+      
+      // Real weekdays only (not Flexible, NotAtHomes, Others)
+      const realDays = ['Saturday', 'Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+      
+      for (const day of realDays) {
+        // Check if this day has any contacts
+        const dayContacts = contacts.filter(contact => 
+          contact.bucket === day && !contact.archived
+        )
+        
+        if (dayContacts.length > 0) {
+          await this.notifications.scheduleWeeklyReminder({
+            id: `daily_${day.toLowerCase()}`,
+            title: '🗓️ Ministry Reminder',
+            body: `You have ${dayContacts.length} contact${dayContacts.length > 1 ? 's' : ''} scheduled for ${day}`,
+            schedule: {
+              weekday: this.getDayIndex(day),
+              time: reminderTime
+            },
+            extra: {
+              type: 'daily_reminder',
+              day: day,
+              contactCount: dayContacts.length
+            }
+          })
+          console.log(`Scheduled daily reminder for ${day} (${dayContacts.length} contacts)`)
+        }
+      }
     } catch (error) {
-      console.error('Failed to schedule daily reminder:', error)
+      console.error('Failed to schedule daily reminders:', error)
+    }
+  }
+
+  // Helper to get day index for scheduling (0 = Sunday, 6 = Saturday)
+  getDayIndex(dayName) {
+    const dayMap = {
+      'Sunday': 0,
+      'Monday': 1,
+      'Tuesday': 2,
+      'Wednesday': 3,
+      'Thursday': 4,
+      'Friday': 5,
+      'Saturday': 6
+    }
+    return dayMap[dayName] || 0
+  }
+
+  // Clear all daily reminders
+  async clearDailyReminders() {
+    try {
+      const pendingNotifications = await this.notifications.getPendingNotifications()
+      
+      for (const notification of pendingNotifications) {
+        if (notification.extra?.type === 'daily_reminder') {
+          await this.notifications.cancelNotification(notification.id)
+        }
+      }
+      
+      console.log('Cleared all daily reminders')
+    } catch (error) {
+      console.error('Failed to clear daily reminders:', error)
     }
   }
 
@@ -206,6 +278,11 @@ class NotificationService {
           await this.scheduleVisitReminder(contact)
         }
       }
+
+      // Update daily reminders if contact bucket changed
+      if (!oldContact || oldContact.bucket !== contact.bucket) {
+        await this.scheduleDailyReminder()
+      }
     } catch (error) {
       console.error('Failed to update notifications for contact:', error)
     }
@@ -217,8 +294,22 @@ class NotificationService {
 
     try {
       await this.cancelVisitReminder(contactId)
+      // Refresh daily reminders since a contact was removed
+      await this.scheduleDailyReminder()
     } catch (error) {
       console.error('Failed to remove notifications for deleted contact:', error)
+    }
+  }
+
+  // Refresh daily reminders (call when settings change)
+  async refreshDailyReminders() {
+    if (!this.isInitialized) return
+
+    try {
+      await this.scheduleDailyReminder()
+      console.log('Daily reminders refreshed')
+    } catch (error) {
+      console.error('Failed to refresh daily reminders:', error)
     }
   }
 

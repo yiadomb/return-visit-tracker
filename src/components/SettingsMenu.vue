@@ -3,40 +3,73 @@
     <button v-if="!inline" class="settings-btn" @click="open = !open" aria-haspopup="menu" :aria-expanded="open">
       ⚙️
     </button>
-    <div v-if="open" class="settings-menu" :class="{ inline }" role="menu" @click.stop>
+    <div v-if="open || inline" class="settings-menu" :class="{ inline }" role="menu" @click.stop>
       <h4>Settings</h4>
 
       <!-- Notifications -->
       <section class="section">
         <h5>Notifications</h5>
         <label class="row">
-          <span>Daily reminder time</span>
-          <input type="time" v-model="dailyTime" @change="saveLocal('dailyTime', dailyTime)" />
+          <span>Set daily reminder</span>
+          <input type="checkbox" v-model="dailyReminderEnabled" @change="saveLocal('dailyReminderEnabled', dailyReminderEnabled)" />
         </label>
-        <label class="row">
-          <span>Month‑end reminder</span>
-          <input type="checkbox" v-model="monthEnd" @change="saveLocal('monthEnd', monthEnd)" />
-        </label>
+        <div v-if="dailyReminderEnabled" class="reminder-time-settings">
+          <div class="time-input-wrapper compact">
+            <span class="time-icon">⏰</span>
+            <input type="time" v-model="dailyTime" @change="saveLocal('dailyTime', dailyTime)" title="Set when you want daily reminders about your ministry work" />
+            <span v-if="!dailyTime" class="time-placeholder">Time</span>
+          </div>
+          <small class="hint">Reminders work for preaching days only</small>
+        </div>
       </section>
 
       <!-- Reporting defaults -->
       <section class="section">
         <h5>Report Recipient</h5>
         <label class="row">
-          <span>Number</span>
-          <input type="tel" v-model="recipientPhone" @change="saveLocal('recipientPhone', recipientPhone)" placeholder="0244444444" />
+          <span>Contact</span>
+          <input type="tel" v-model="recipientPhone" @change="saveLocal('recipientPhone', recipientPhone)" placeholder="0555000000" class="compact-input" />
         </label>
+        <div class="via-group">
+          <label class="row tight">
+            <span>Via</span>
+            <div class="custom-dropdown" :ref="el => viaDropdownRef = el">
+              <button 
+                type="button" 
+                class="dropdown-trigger"
+                @click="showViaDropdown = !showViaDropdown"
+              >
+                {{ shareChannel === 'whatsapp' ? 'WhatsApp' : 'SMS' }}
+                <span class="dropdown-arrow">{{ showViaDropdown ? '▲' : '▼' }}</span>
+              </button>
+              <div v-if="showViaDropdown" class="dropdown-menu">
+                <button 
+                  type="button" 
+                  class="dropdown-option"
+                  :class="{ active: shareChannel === 'whatsapp' }"
+                  @click="selectVia('whatsapp')"
+                >
+                  WhatsApp
+                </button>
+                <button 
+                  type="button" 
+                  class="dropdown-option"
+                  :class="{ active: shareChannel === 'sms' }"
+                  @click="selectVia('sms')"
+                >
+                  SMS
+                </button>
+              </div>
+            </div>
+          </label>
+        </div>
         <label class="row">
-          <span>Via</span>
-          <select v-model="shareChannel" @change="saveLocal('shareChannel', shareChannel)">
-            <option value="auto">Auto</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="sms">SMS</option>
-          </select>
-        </label>
-        <label class="row">
-          <span>Include hours by default</span>
+          <span>Report hours</span>
           <input type="checkbox" v-model="includeHours" @change="saveLocal('includeHours', includeHours)" />
+        </label>
+        <label class="row">
+          <span>Remind to submit report</span>
+          <input type="checkbox" v-model="monthEnd" @change="saveLocal('monthEnd', monthEnd)" />
         </label>
       </section>
 
@@ -54,34 +87,132 @@
         <h5>Appearance</h5>
         <label class="row">
           <span>Theme</span>
-          <select v-model="theme" @change="applyTheme">
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
+          <div class="custom-dropdown" :ref="el => themeDropdownRef = el">
+            <button 
+              type="button" 
+              class="dropdown-trigger"
+              @click="showThemeDropdown = !showThemeDropdown"
+            >
+              {{ theme === 'light' ? 'Light' : 'Dark' }}
+              <span class="dropdown-arrow">{{ showThemeDropdown ? '▲' : '▼' }}</span>
+            </button>
+            <div v-if="showThemeDropdown" class="dropdown-menu">
+              <button 
+                type="button" 
+                class="dropdown-option"
+                :class="{ active: theme === 'light' }"
+                @click="selectTheme('light')"
+              >
+                Light
+              </button>
+              <button 
+                type="button" 
+                class="dropdown-option"
+                :class="{ active: theme === 'dark' }"
+                @click="selectTheme('dark')"
+              >
+                Dark
+              </button>
+            </div>
+          </div>
         </label>
       </section>
 
       <!-- Account (last) -->
-      <section class="section">
+      <section class="section account-section">
         <h5>Account</h5>
-        <div v-if="user">
-          <p class="muted">Backed up to cloud as <strong>{{ user.email }}</strong></p>
-          <button class="secondary" @click="signOut" :disabled="loading">Sign out</button>
-        </div>
-        <div v-else>
-          <button class="primary" v-if="!showLoginForm" @click="showLoginForm=true">Backup to cloud</button>
-          <form v-else @submit.prevent="submit">
-            <input v-model="email" type="email" placeholder="email" autocomplete="email" required />
-            <input v-model="password" type="password" placeholder="password" autocomplete="current-password" required />
-            <div class="row" style="justify-content:flex-end; gap:0.5rem;">
-              <button type="button" class="secondary" @click="showLoginForm=false">Cancel</button>
-              <button type="submit" :disabled="loading">{{ loading ? 'Working…' : 'Sign in / Create account' }}</button>
+        
+        <!-- Signed in state -->
+        <div v-if="user" class="account-card signed-in">
+          <div class="account-status">
+            <div class="status-indicator online"></div>
+            <div class="account-info">
+              <div class="account-email">{{ user.email }}</div>
+              <div class="account-status-text">Cloud sync enabled</div>
             </div>
-            <p class="hint">Optional. Sign in to sync across devices.</p>
+          </div>
+          <button class="btn-secondary-pro" @click="signOut" :disabled="loading">
+            {{ loading ? 'Signing out...' : 'Sign out' }}
+          </button>
+        </div>
+        
+        <!-- Not signed in state -->
+        <div v-else class="account-card">
+          <div v-if="!showLoginForm" class="account-prompt">
+            <div class="cloud-icon">☁️</div>
+            <div class="prompt-text">
+              <div class="prompt-title">Cloud Backup</div>
+              <div class="prompt-subtitle">Sync your data across devices</div>
+            </div>
+            <button class="btn-primary-pro" @click="showLoginForm=true">
+              Get started
+            </button>
+          </div>
+          
+          <!-- Login form -->
+          <form v-else @submit.prevent="submit" class="login-form">
+            <div class="form-header">
+              <h6>Sign in or create account</h6>
+              <p class="form-subtitle">Sync your contacts across all devices</p>
+            </div>
+            
+            <div class="form-fields">
+              <div class="field-group">
+                <input 
+                  v-model="email" 
+                  type="email" 
+                  placeholder="Email address" 
+                  autocomplete="email" 
+                  class="pro-input"
+                  required 
+                />
+              </div>
+              <div class="field-group">
+                <div class="password-field">
+                  <input 
+                    v-model="password" 
+                    :type="showPassword ? 'text' : 'password'"
+                    placeholder="Password" 
+                    autocomplete="current-password" 
+                    class="pro-input password-input"
+                    required 
+                  />
+                  <button 
+                    type="button" 
+                    class="password-toggle"
+                    @click="showPassword = !showPassword"
+                    :title="showPassword ? 'Hide password' : 'Show password'"
+                  >
+                    {{ showPassword ? '🙈' : '👁️' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+            
+            <div class="form-actions">
+              <button type="button" class="btn-secondary-pro" @click="showLoginForm=false">
+                Cancel
+              </button>
+              <button type="submit" class="btn-primary-pro" :disabled="loading">
+                {{ loading ? 'Connecting...' : 'Continue' }}
+              </button>
+            </div>
+            
+            <p class="form-disclaimer">
+              Your data stays private and secure. We only sync your contacts across your devices.
+            </p>
           </form>
         </div>
-        <p v-if="error" class="error">{{ error }}</p>
-        <p v-if="message" class="message">{{ message }}</p>
+        
+        <!-- Status messages -->
+        <div v-if="error" class="status-message error-message">
+          <span class="status-icon">⚠️</span>
+          {{ error }}
+        </div>
+        <div v-if="message" class="status-message success-message">
+          <span class="status-icon">✅</span>
+          {{ message }}
+        </div>
       </section>
     </div>
     
@@ -115,6 +246,7 @@
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { authService } from '../services/authService.js'
 import { db, contactService } from '../services/db.js'
+import { notificationService } from '../services/notificationService.js'
 
 export default {
   name: 'SettingsMenu',
@@ -125,6 +257,7 @@ export default {
     const user = ref(null)
     const email = ref('')
     const password = ref('')
+    const showPassword = ref(false)
     const loading = ref(false)
     const error = ref('')
     const message = ref('')
@@ -136,18 +269,46 @@ export default {
     const archivedCount = ref(0)
 
     const theme = ref(localStorage.getItem('theme') || 'light')
-    const dailyTime = ref(localStorage.getItem('dailyTime') || '')
-    const monthEnd = ref(localStorage.getItem('monthEnd') === 'true')
+    // Default to enabled if not set, for new users
+    const dailyReminderEnabled = ref(localStorage.getItem('dailyReminderEnabled') === null ? true : localStorage.getItem('dailyReminderEnabled') === 'true')
+    const dailyTime = ref(localStorage.getItem('dailyTime') || '07:00')
+    const monthEnd = ref(localStorage.getItem('monthEnd') === null ? true : localStorage.getItem('monthEnd') === 'true')
     const recipientPhone = ref(localStorage.getItem('recipientPhone') || '')
-    const shareChannel = ref(localStorage.getItem('shareChannel') || 'auto')
-    const includeHours = ref(localStorage.getItem('includeHours') === 'true')
+    const shareChannel = ref(localStorage.getItem('shareChannel') || 'whatsapp')
+    const includeHours = ref(localStorage.getItem('includeHours') === null ? true : localStorage.getItem('includeHours') === 'true')
+
+    // Custom dropdown states
+    const showThemeDropdown = ref(false)
+    const showViaDropdown = ref(false)
+    const themeDropdownRef = ref(null)
+    const viaDropdownRef = ref(null)
 
     const applyTheme = () => {
       localStorage.setItem('theme', theme.value)
       document.documentElement.setAttribute('data-theme', theme.value)
     }
 
-    const saveLocal = (k, v) => localStorage.setItem(k, String(v))
+    // Custom dropdown handlers
+    const selectTheme = (newTheme) => {
+      theme.value = newTheme
+      showThemeDropdown.value = false
+      applyTheme()
+    }
+
+    const selectVia = (newChannel) => {
+      shareChannel.value = newChannel
+      showViaDropdown.value = false
+      saveLocal('shareChannel', newChannel)
+    }
+
+    const saveLocal = (k, v) => {
+      localStorage.setItem(k, String(v))
+      
+      // Refresh daily reminders when daily reminder settings change
+      if (k === 'dailyReminderEnabled' || k === 'dailyTime') {
+        notificationService.refreshDailyReminders().catch(console.error)
+      }
+    }
 
     const loadUser = async () => {
       user.value = await authService.getUser().catch(() => null)
@@ -192,6 +353,21 @@ export default {
       if (!open.value) return
       const r = rootRef.value
       if (r && !r.contains(e.target)) open.value = false
+
+      // Close custom dropdowns when clicking outside
+      if (showThemeDropdown.value) {
+        const themeEl = themeDropdownRef.value
+        if (!themeEl || !themeEl.contains(e.target)) {
+          showThemeDropdown.value = false
+        }
+      }
+
+      if (showViaDropdown.value) {
+        const viaEl = viaDropdownRef.value
+        if (!viaEl || !viaEl.contains(e.target)) {
+          showViaDropdown.value = false
+        }
+      }
     }
 
     const loadArchivedContacts = async () => {
@@ -230,9 +406,29 @@ export default {
     })
     
     onMounted(async () => {
-      // Attach outside-click listener only when used as a popover
+      // Set defaults if not already saved
+      if (localStorage.getItem('dailyReminderEnabled') === null) {
+        saveLocal('dailyReminderEnabled', true)
+      }
+      if (!localStorage.getItem('dailyTime')) {
+        saveLocal('dailyTime', '07:00')
+      }
+      if (!localStorage.getItem('shareChannel')) {
+        saveLocal('shareChannel', 'whatsapp')
+      }
+      if (localStorage.getItem('includeHours') === null) {
+        saveLocal('includeHours', true)
+      }
+      if (localStorage.getItem('monthEnd') === null) {
+        saveLocal('monthEnd', true)
+      }
+
+      // Attach outside-click listener for dropdowns always, and for menu close when not inline
+      document.addEventListener('click', onDocClick)
+      
+      // Additional setup for non-inline use
       if (!props.inline) {
-        document.addEventListener('click', onDocClick)
+        // Already handled by onDocClick above
       }
       loadUser()
       applyTheme()
@@ -249,9 +445,11 @@ export default {
     })
 
     onBeforeUnmount(() => {
-      if (!props.inline) {
-        document.removeEventListener('click', onDocClick)
-      } else if (window.__rv_refreshArchived) {
+      // Always remove the click listener since we always add it now
+      document.removeEventListener('click', onDocClick)
+      
+      // Clean up refresh listeners for inline mode
+      if (props.inline && window.__rv_refreshArchived) {
         window.removeEventListener('rv:refresh', window.__rv_refreshArchived)
         window.removeEventListener('focus', window.__rv_refreshArchived)
         delete window.__rv_refreshArchived
@@ -259,9 +457,11 @@ export default {
     })
 
     return { 
-      inline: props.inline, open, rootRef, user, email, password, loading, error, message, 
-      theme, dailyTime, monthEnd, recipientPhone, shareChannel, includeHours, 
+      inline: props.inline, open, rootRef, user, email, password, showPassword, loading, error, message, 
+      theme, dailyReminderEnabled, dailyTime, monthEnd, recipientPhone, shareChannel, includeHours, 
       submit, signOut, applyTheme, saveLocal, showLoginForm,
+      // Custom dropdowns
+      showThemeDropdown, showViaDropdown, themeDropdownRef, viaDropdownRef, selectTheme, selectVia,
       // Archived contacts
       showArchivedModal, archivedContacts, archivedCount, restoreContact, openArchivedModal
     }
@@ -284,6 +484,411 @@ button.secondary { background: transparent; border: 1px solid var(--border-color
 .hint { color: #666; font-size: 0.9rem; }
 .error { color: #e74c3c; }
 .message { color: #27ae60; }
+
+/* Time input with icon */
+.time-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border-color,#ddd);
+  border-radius: 6px;
+  background: white;
+  padding: 0.4rem 0.5rem;
+  gap: 0.4rem;
+}
+
+.time-input-wrapper.compact {
+  max-width: 140px;
+  padding: 0.35rem 0.45rem;
+}
+
+.time-icon {
+  font-size: 0.9rem;
+  opacity: 0.7;
+}
+
+.time-input-wrapper input[type="time"] {
+  border: none;
+  padding: 0;
+  background: transparent;
+  font-size: 0.9rem;
+  min-width: 60px;
+}
+
+.time-input-wrapper.compact input[type="time"] {
+  font-size: 0.85rem;
+  min-width: 50px;
+}
+
+.time-placeholder {
+  color: #999;
+  font-size: 0.9rem;
+  pointer-events: none;
+  position: absolute;
+  right: 0.5rem;
+}
+
+.time-input-wrapper input[type="time"]:not(:placeholder-shown) + .time-placeholder {
+  display: none;
+}
+
+/* Reminder time settings */
+.reminder-time-settings {
+  margin-left: 1rem;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0;
+  border-left: 2px solid var(--border-color, #eee);
+  padding-left: 0.75rem;
+}
+
+/* Compact input */
+.compact-input {
+  max-width: 120px;
+}
+
+/* Via group - tighter spacing */
+.via-group {
+  margin-top: -0.15rem;
+}
+
+.row.tight {
+  margin: 0.1rem 0;
+}
+
+/* Professional Account Section */
+.account-section {
+  border-top: 1px solid var(--border-color,#eee);
+}
+
+.account-card {
+  background: var(--cell-background-color, #f8f9fa);
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 1.25rem;
+  margin-top: 0.75rem;
+}
+
+.account-card.signed-in {
+  background: linear-gradient(135deg, #f0f9f4 0%, #f8fafc 100%);
+  border-color: #10b981;
+}
+
+/* Account status (signed in) */
+.account-status {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-indicator.online {
+  background: #10b981;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.account-info {
+  flex: 1;
+}
+
+.account-email {
+  font-weight: 600;
+  color: var(--text-color);
+  font-size: 0.95rem;
+}
+
+.account-status-text {
+  font-size: 0.8rem;
+  color: #10b981;
+  margin-top: 0.15rem;
+}
+
+/* Account prompt (not signed in) */
+.account-prompt {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  text-align: left;
+}
+
+.cloud-icon {
+  font-size: 1.5rem;
+  opacity: 0.8;
+}
+
+.prompt-text {
+  flex: 1;
+}
+
+.prompt-title {
+  font-weight: 600;
+  color: var(--text-color);
+  font-size: 0.95rem;
+}
+
+.prompt-subtitle {
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 0.15rem;
+}
+
+/* Professional buttons */
+.btn-primary-pro {
+  background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+  color: white;
+  border: none;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.2);
+}
+
+.btn-primary-pro:hover:not(:disabled) {
+  background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+  box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3);
+  transform: translateY(-1px);
+}
+
+.btn-primary-pro:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-secondary-pro {
+  background: var(--background-color, white);
+  color: var(--text-color);
+  border: 1px solid var(--border-color, #d1d5db);
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary-pro:hover:not(:disabled) {
+  background: var(--cell-background-color, #f3f4f6);
+  border-color: #9ca3af;
+  transform: translateY(-1px);
+}
+
+.btn-secondary-pro:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Login form */
+.login-form {
+  margin-top: 0.5rem;
+}
+
+.form-header {
+  margin-bottom: 1.25rem;
+  text-align: center;
+}
+
+.form-header h6 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.form-subtitle {
+  font-size: 0.85rem;
+  color: #666;
+  margin: 0.5rem 0 0 0;
+}
+
+.form-fields {
+  margin-bottom: 1.25rem;
+}
+
+.field-group {
+  margin-bottom: 0.75rem;
+}
+
+.pro-input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  background: var(--background-color, white);
+  color: var(--text-color);
+  transition: all 0.2s ease;
+}
+
+.pro-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.pro-input::placeholder {
+  color: #9ca3af;
+}
+
+.form-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.form-disclaimer {
+  font-size: 0.8rem;
+  color: #666;
+  text-align: center;
+  line-height: 1.4;
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+/* Status messages */
+.status-message {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+}
+
+.error-message {
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+}
+
+.success-message {
+  background: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.status-icon {
+  font-size: 0.9rem;
+}
+
+/* Password field with toggle */
+.password-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-input {
+  padding-right: 3rem !important;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 0.75rem;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.25rem;
+  font-size: 1rem;
+  color: #666;
+  transition: opacity 0.2s ease;
+  user-select: none;
+}
+
+.password-toggle:hover {
+  opacity: 0.7;
+}
+
+/* Custom dropdowns */
+.custom-dropdown {
+  position: relative;
+  display: inline-block;
+  min-width: 100px;
+}
+
+.dropdown-trigger {
+  background: var(--background-color, white);
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  font-size: 0.85rem;
+  color: var(--text-color);
+  transition: all 0.2s ease;
+}
+
+.dropdown-trigger:hover {
+  border-color: #9ca3af;
+  background: var(--cell-background-color, #f9fafb);
+}
+
+.dropdown-trigger:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.dropdown-arrow {
+  font-size: 0.7rem;
+  opacity: 0.7;
+  transition: transform 0.2s ease;
+}
+
+.dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background: var(--background-color, white);
+  border: 1px solid var(--border-color, #d1d5db);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+  overflow: hidden;
+}
+
+.dropdown-option {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 0.85rem;
+  color: var(--text-color);
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.dropdown-option:hover {
+  background: var(--cell-background-color, #f3f4f6);
+}
+
+.dropdown-option.active {
+  background: #3b82f6;
+  color: white;
+}
+
+.dropdown-option.active:hover {
+  background: #1d4ed8;
+}
 
 /* Archived modal */
 .archived-modal-overlay {

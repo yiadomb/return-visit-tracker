@@ -80,12 +80,13 @@
 </template>
 
 <script>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import ContactDrawer from '../components/features/ContactDrawer.vue'
 import { useContacts } from '../composables/useDb'
 import { notificationService } from '../services/notificationService'
 import { getHostelColors } from '../utils/hostelColor.js'
 import router from '../router'
+import { usePullToRefresh } from '../composables/usePullToRefresh.js'
 
 export default {
   name: 'AgendaView',
@@ -149,36 +150,12 @@ export default {
     const outerStartX = ref(0)
     const outerStartY = ref(0)
     const onOuterTouchStart = (event) => {
-      const t = event.touches && event.touches[0]
-      if (!t) return
-      // Ignore when interacting with inputs or buttons
-      const target = event.target
-      if (target.closest('input, textarea, button, a')) {
-        outerStartX.value = 0
-        outerStartY.value = 0
-        return
-      }
-      outerStartX.value = t.clientX
-      outerStartY.value = t.clientY
+      // Disabled - no longer navigate between Contacts and Agenda via swipe
+      return
     }
     const onOuterTouchEnd = (event) => {
-      if (!outerStartX.value && !outerStartY.value) return
-      const t = event.changedTouches && event.changedTouches[0]
-      if (!t) return
-      const dx = t.clientX - outerStartX.value
-      const dy = Math.abs(t.clientY - outerStartY.value)
-      outerStartX.value = 0
-      outerStartY.value = 0
-      if (Math.abs(dx) > 80 && Math.abs(dx) > dy) {
-        const current = router.currentRoute.value.name
-        if (dx > 0 && current === 'Agenda') {
-          router.push({ name: 'Home' })
-        } else if (dx < 0 && current === 'Home') {
-          router.push({ name: 'Agenda' })
-        } else if (dx > 0) {
-          router.push({ name: 'Home' })
-        }
-      }
+      // Disabled - no longer navigate between Contacts and Agenda via swipe
+      return
     }
 
     const getHostelStyle = (hostelName) => {
@@ -257,6 +234,11 @@ export default {
       } catch (error) {
         console.warn('Failed to initialize notifications in AgendaView:', error)
       }
+
+      // Pull-to-refresh for agenda content
+      await nextTick()
+      const getScrollableEl = () => document.querySelector('.agenda-content')
+      usePullToRefresh(getScrollableEl)
     })
 
     return {

@@ -182,8 +182,8 @@ export default {
 }
 .icon-btn .spinner { display: inline-block; animation: rvspin 0.9s linear infinite; }
 
-/* Hide refresh icon on phone and tablet; show on desktop */
-@media (max-width: 1024px) {
+/* Hide refresh icon on phone and tablet; show only on large desktop */
+@media (max-width: 1200px) {
   .refresh-btn { display: none; }
 }
 </style> 

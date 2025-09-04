@@ -3,9 +3,6 @@
     <!-- Desktop: Full Grid -->
     <div class="grid-container" :class="{ 'mobile-view': isMobile }" @touchstart.passive="handleOuterTouchStart" @touchend.passive="handleOuterTouchEnd">
       <div class="controls-panel">
-        <div class="top-add-row">
-          <button class="add-top-btn" @click="openAddContactDrawer()">Add Contact</button>
-        </div>
         <div class="grid-toolbar controls-card">
         <div class="search-wrap">
           <input
@@ -86,6 +83,67 @@
           <div class="bucket-header">
             <h3>{{ bucket }}</h3>
             <span class="contact-count">({{ getBucketContacts(bucket).length }})</span>
+            
+            <!-- Sort controls -->
+            <div class="sort-controls" :ref="el => sortDropdownRefs[bucket] = el">
+              <!-- Field selector dropdown -->
+              <button 
+                class="sort-field-btn" 
+                @click="toggleSortDropdown(bucket)"
+                :title="`Sort ${bucket} contacts`"
+                aria-label="Sort field"
+              >
+                <span class="sort-field-icon">
+                  {{ getBucketSort(bucket).field === 'date' ? '📅' : 
+                     getBucketSort(bucket).field === 'hostel' ? '🏠' : '⋮' }}
+                </span>
+              </button>
+              
+              <div v-if="showSortDropdown[bucket]" class="sort-menu" @click.stop>
+                <button 
+                  class="sort-option" 
+                  :class="{ active: getBucketSort(bucket).field === 'manual' }"
+                  @click="setSortAndClose(bucket, 'manual')"
+                >
+                  ⋮ Manual Order
+                </button>
+                <button 
+                  class="sort-option" 
+                  :class="{ active: getBucketSort(bucket).field === 'date' }"
+                  @click="setSortAndClose(bucket, 'date')"
+                >
+                  📅 By Date
+                </button>
+                <button 
+                  class="sort-option" 
+                  :class="{ active: getBucketSort(bucket).field === 'hostel' }"
+                  @click="setSortAndClose(bucket, 'hostel')"
+                >
+                  🏠 By Hostel
+                </button>
+              </div>
+              
+              <!-- Direction controls (only show for non-manual sorting) -->
+              <div v-if="getBucketSort(bucket).field !== 'manual'" class="sort-direction-controls">
+                <button 
+                  class="sort-direction-btn"
+                  :class="{ active: getBucketSort(bucket).direction === 'asc' }"
+                  @click="setBucketSort(bucket, getBucketSort(bucket).field, 'asc')"
+                  title="Ascending"
+                >
+                  ↑
+                </button>
+                <button 
+                  class="sort-direction-btn"
+                  :class="{ active: getBucketSort(bucket).direction === 'desc' }"
+                  @click="setBucketSort(bucket, getBucketSort(bucket).field, 'desc')"
+                  title="Descending"
+                >
+                  ↓
+                </button>
+              </div>
+            </div>
+            
             <button class="add-icon-btn" @click="openAddContactDrawer(bucket)" :title="`Add contact to ${bucket}`" aria-label="Add contact">＋</button>
           </div>
           
@@ -115,72 +173,25 @@
                 @contextmenu.prevent
                 :class="{ armed: armedContactId === contact.id }"
               >
-                <!-- Name -->
-                <div class="contact-name">
-                  <template v-if="isCellEditing(contact, 'name')">
-                    <input
-                      class="inline-input"
-                      v-model="editBuffer"
-                      autofocus
-                      @keyup.enter="commitEdit(contact, 'name')"
-                      @keyup.esc="cancelEdit"
-                      @blur="commitEdit(contact, 'name')"
-                    />
-                  </template>
-                  <template v-else>
-                    <span v-html="highlight(contact.name)"></span>
-                  </template>
+                <!-- Use same clean structure as mobile -->
+                <div class="contact-name-row">
+                  <div class="contact-name">
+                    {{ contact.name || 'Unnamed contact' }}
+                  </div>
+                  <!-- Next visit date on the right -->
+                  <div class="contact-next-visit" v-if="contact.next_visit_at">
+                    {{ formatDate(contact.next_visit_at, contact) }}
+                  </div>
                 </div>
-
-                <!-- Hostel -->
                 <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
-                  <template v-if="isCellEditing(contact, 'hostel_name')">
-                    <input
-                      class="inline-input"
-                      v-model="editBuffer"
-                      autofocus
-                      @keyup.enter="commitEdit(contact, 'hostel_name')"
-                      @keyup.esc="cancelEdit"
-                      @blur="commitEdit(contact, 'hostel_name')"
-                    />
-                  </template>
-                  <template v-else>
-                    <span v-html="highlight(contact.hostel_name || 'No hostel')"></span>
-                    <span v-if="contact.location_detail" class="location-detail">
-                      · {{ contact.location_detail }}
-                    </span>
-                  </template>
-                </div>
-
-                <!-- Date & Notes -->
-                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes || isCellEditing(contact, 'next_visit_at') || isCellEditing(contact, 'notes')">
-                  <!-- Date -->
-                  <span class="contact-date">
-                    <template v-if="isCellEditing(contact, 'next_visit_at')">
-                      <input type="date" class="inline-input date" v-model="editBufferDate" />
-                      <input type="time" class="inline-input time" v-model="editBufferTime" />
-                      <button class="inline-save" @click.stop="commitEdit(contact, 'next_visit_at')">Save</button>
-                    </template>
-                    <template v-else>
-                      <span v-if="contact.next_visit_at">{{ formatDate(contact.next_visit_at) }}</span>
-                    </template>
+                  <span>{{ contact.hostel_name || 'No hostel' }}</span>
+                  <span v-if="contact.location_detail" class="location-detail">
+                    · {{ contact.location_detail }}
                   </span>
-
-                  <!-- Notes -->
+                </div>
+                <div class="contact-notes-only" v-if="contact.notes">
                   <span class="contact-notes">
-                    <template v-if="isCellEditing(contact, 'notes')">
-                      <input
-                        class="inline-input"
-                        v-model="editBuffer"
-                        autofocus
-                        @keyup.enter="commitEdit(contact, 'notes')"
-                        @keyup.esc="cancelEdit"
-                        @blur="commitEdit(contact, 'notes')"
-                      />
-                    </template>
-                    <template v-else>
-                      <span v-if="contact.notes">{{ contact.notes }}</span>
-                    </template>
+                    {{ contact.notes }}
                   </span>
                 </div>
               </div>
@@ -222,6 +233,67 @@
             <div class="mobile-bucket-header">
               <h3>{{ bucket }}</h3>
               <span class="mobile-contact-count">({{ getBucketContacts(bucket).length }})</span>
+              
+              <!-- Mobile Sort controls -->
+              <div class="sort-controls mobile-sort" :ref="el => sortDropdownRefs[bucket] = el">
+                <!-- Field selector dropdown -->
+                <button 
+                  class="sort-field-btn mobile-sort-field-btn" 
+                  @click="toggleSortDropdown(bucket)"
+                  :title="`Sort ${bucket} contacts`"
+                  aria-label="Sort field"
+                >
+                  <span class="sort-field-icon">
+                    {{ getBucketSort(bucket).field === 'date' ? '📅' : 
+                       getBucketSort(bucket).field === 'hostel' ? '🏠' : '⋮' }}
+                  </span>
+                </button>
+                
+                <div v-if="showSortDropdown[bucket]" class="sort-menu mobile-sort-menu" @click.stop>
+                  <button 
+                    class="sort-option" 
+                    :class="{ active: getBucketSort(bucket).field === 'manual' }"
+                    @click="setSortAndClose(bucket, 'manual')"
+                  >
+                    ⋮ Manual Order
+                  </button>
+                  <button 
+                    class="sort-option" 
+                    :class="{ active: getBucketSort(bucket).field === 'date' }"
+                    @click="setSortAndClose(bucket, 'date')"
+                  >
+                    📅 By Date
+                  </button>
+                  <button 
+                    class="sort-option" 
+                    :class="{ active: getBucketSort(bucket).field === 'hostel' }"
+                    @click="setSortAndClose(bucket, 'hostel')"
+                  >
+                    🏠 By Hostel
+                  </button>
+                </div>
+                
+                <!-- Direction controls (only show for non-manual sorting) -->
+                <div v-if="getBucketSort(bucket).field !== 'manual'" class="sort-direction-controls mobile-direction-controls">
+                  <button 
+                    class="sort-direction-btn"
+                    :class="{ active: getBucketSort(bucket).direction === 'asc' }"
+                    @click="setBucketSort(bucket, getBucketSort(bucket).field, 'asc')"
+                    title="Ascending"
+                  >
+                    ↑
+                  </button>
+                  <button 
+                    class="sort-direction-btn"
+                    :class="{ active: getBucketSort(bucket).direction === 'desc' }"
+                    @click="setBucketSort(bucket, getBucketSort(bucket).field, 'desc')"
+                    title="Descending"
+                  >
+                    ↓
+                  </button>
+                </div>
+              </div>
+              
               <button class="add-icon-btn" @click="openAddContactDrawer(bucket)" :title="`Add contact to ${bucket}`" aria-label="Add contact">＋</button>
             </div>
             
@@ -240,8 +312,14 @@
                 :class="{ armed: armedContactId === contact.id }"
               >
                 <!-- Use same structure as tablet -->
-                <div class="contact-name">
-                  {{ contact.name || 'Unnamed contact' }}
+                <div class="contact-name-row">
+                  <div class="contact-name">
+                    {{ contact.name || 'Unnamed contact' }}
+                  </div>
+                  <!-- Next visit date on the right -->
+                  <div class="contact-next-visit" v-if="contact.next_visit_at">
+                    {{ formatDate(contact.next_visit_at, contact) }}
+                  </div>
                 </div>
                 <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
                   <span>{{ contact.hostel_name || 'No hostel' }}</span>
@@ -249,11 +327,8 @@
                     · {{ contact.location_detail }}
                   </span>
                 </div>
-                <div class="contact-date-notes" v-if="contact.next_visit_at || contact.notes">
-                  <span class="contact-date" v-if="contact.next_visit_at">
-                    {{ formatDate(contact.next_visit_at) }}
-                  </span>
-                  <span class="contact-notes" v-if="contact.notes">
+                <div class="contact-notes-only" v-if="contact.notes">
+                  <span class="contact-notes">
                     {{ contact.notes }}
                   </span>
                 </div>
@@ -546,9 +621,73 @@ export default {
     const clearTags = () => { selectedTags.value = [] }
     const allTags = computed(() => MINISTRY_TAGS)
 
-    // Sorting state (keep manual only for now)
-    const sortField = ref('manual')
-    const sortDir = ref('asc')
+    // Sorting state per bucket
+    const bucketSortSettings = ref({})
+    
+    // Initialize sorting settings for all buckets
+    BUCKETS.forEach(bucket => {
+      bucketSortSettings.value[bucket] = {
+        field: 'manual', // 'manual', 'date', 'hostel'
+        direction: 'asc' // 'asc', 'desc'
+      }
+    })
+
+    // Get sorting settings for a bucket
+    const getBucketSort = (bucket) => {
+      return bucketSortSettings.value[bucket] || { field: 'manual', direction: 'asc' }
+    }
+
+    // Update sorting for a bucket
+    const setBucketSort = (bucket, field, direction = null) => {
+      const current = getBucketSort(bucket)
+      // If same field clicked, toggle direction; otherwise use provided direction or default to 'asc'
+      const newDirection = direction || (current.field === field && current.direction === 'asc' ? 'desc' : 'asc')
+      
+      bucketSortSettings.value[bucket] = {
+        field,
+        direction: newDirection
+      }
+    }
+
+    // Sort dropdown state
+    const showSortDropdown = ref({})
+    const sortDropdownRefs = ref({})
+    
+    // Initialize dropdown visibility for all buckets
+    BUCKETS.forEach(bucket => {
+      showSortDropdown.value[bucket] = false
+    })
+
+    // Toggle sort dropdown
+    const toggleSortDropdown = (bucket) => {
+      // Close all other dropdowns first
+      BUCKETS.forEach(b => {
+        if (b !== bucket) showSortDropdown.value[b] = false
+      })
+      showSortDropdown.value[bucket] = !showSortDropdown.value[bucket]
+    }
+
+    // Set sort and close dropdown
+    const setSortAndClose = (bucket, field) => {
+      setBucketSort(bucket, field)
+      showSortDropdown.value[bucket] = false
+    }
+
+    // Close dropdowns when clicking outside
+    onMounted(() => {
+      document.addEventListener('click', (e) => {
+        const clickedInsideDropdown = BUCKETS.some(bucket => {
+          const dropdownEl = sortDropdownRefs.value[bucket]
+          return dropdownEl && dropdownEl.contains(e.target)
+        })
+        
+        if (!clickedInsideDropdown) {
+          BUCKETS.forEach(bucket => {
+            showSortDropdown.value[bucket] = false
+          })
+        }
+      })
+    })
 
     // Get contacts for a specific bucket (exclude archived)
     const getBucketContacts = (bucket) => {
@@ -572,26 +711,94 @@ export default {
         })
       }
 
-      // Sorting
-      if (sortField.value === 'manual') {
-        list.sort((a, b) => (a.display_order || 0) - (b.display_order || 0))
-      } else if (sortField.value === 'name') {
-        list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-      } else if (sortField.value === 'date') {
-        const toTs = v => v ? new Date(v).getTime() : 0
-        list.sort((a, b) => toTs(a.next_visit_at) - toTs(b.next_visit_at))
-      } else if (sortField.value === 'hostel') {
-        list.sort((a, b) => (a.hostel_name || '').localeCompare(b.hostel_name || ''))
+      // Apply sorting based on bucket settings
+      const sortSettings = getBucketSort(bucket)
+      const isDesc = sortSettings.direction === 'desc'
+      
+      switch (sortSettings.field) {
+        case 'date':
+          list.sort((a, b) => {
+            const dateA = a.next_visit_at ? new Date(a.next_visit_at).getTime() : null
+            const dateB = b.next_visit_at ? new Date(b.next_visit_at).getTime() : null
+            
+            // Handle null values - always put them at the bottom
+            if (dateA === null && dateB === null) return 0
+            if (dateA === null) return 1  // A goes to bottom
+            if (dateB === null) return -1 // B goes to bottom
+            
+            return isDesc ? dateB - dateA : dateA - dateB
+          })
+          break
+          
+        case 'hostel':
+          list.sort((a, b) => {
+            const hostelA = (a.hostel_name || '').trim().toLowerCase()
+            const hostelB = (b.hostel_name || '').trim().toLowerCase()
+            
+            // Handle empty values - always put them at the bottom
+            if (!hostelA && !hostelB) return 0
+            if (!hostelA) return 1  // A goes to bottom
+            if (!hostelB) return -1 // B goes to bottom
+            
+            const comparison = hostelA.localeCompare(hostelB)
+            return isDesc ? -comparison : comparison
+          })
+          break
+          
+        case 'manual':
+        default:
+          // Sort by display_order (manual ordering)
+          list.sort((a, b) => {
+            const orderComparison = (a.display_order || 0) - (b.display_order || 0)
+            return isDesc ? -orderComparison : orderComparison
+          })
+          break
       }
-
-      if (sortDir.value === 'desc') list.reverse()
       return list
     }
 
-    // Format date for display
-    const formatDate = (dateString) => {
+    // Format date for display with relative dates and time (time only for nearby dates and when explicitly set)
+    const formatDate = (dateString, contact = null) => {
       if (!dateString) return ''
+      
       const date = new Date(dateString)
+      const today = new Date()
+      
+      // Check if time was explicitly set by user (default to true for backward compatibility)
+      const showTime = !contact || contact.time_explicitly_set !== false
+      
+      // Reset time to compare dates only
+      const resetTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+      const targetDate = resetTime(date)
+      const todayDate = resetTime(today)
+      
+      // Calculate difference in days
+      const diffTime = targetDate.getTime() - todayDate.getTime()
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+      
+      // Get time in 12-hour format (only for nearby dates and when explicitly set)
+      const timeStr = showTime ? ` ${date.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      })}` : ''
+      
+      // Return relative dates with time for nearby dates (within a week)
+      if (diffDays === 0) return `Today${timeStr}`
+      if (diffDays === 1) return `Tomorrow${timeStr}`
+      if (diffDays === -1) return `Yesterday${timeStr}`
+      
+      // For dates within the current week, show day names
+      if (diffDays >= 2 && diffDays <= 6) {
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
+        return `${dayName}${timeStr}`
+      }
+      if (diffDays <= -2 && diffDays >= -6) {
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
+        return `${dayName}${timeStr}`
+      }
+      
+      // For dates further away (more than a week), show only the date
       return date.toLocaleDateString('en-US', { 
         month: 'short', 
         day: 'numeric' 
@@ -788,39 +995,12 @@ export default {
     const outerTouchStartX = ref(0)
     const outerTouchStartY = ref(0)
     const handleOuterTouchStart = (event) => {
-      // Ignore gestures inside interactive areas (day carousel, inputs, buttons)
-      const target = event.target
-      if (
-        target.closest('.mobile-carousel-container') ||
-        target.closest('.bucket-columns') ||
-        target.closest('input, textarea, button, a, .contact-cell')
-      ) {
-        outerTouchStartX.value = 0
-        outerTouchStartY.value = 0
-        return
-      }
-      const t = event.touches && event.touches[0]
-      if (!t) return
-      outerTouchStartX.value = t.clientX
-      outerTouchStartY.value = t.clientY
+      // Disabled - no longer navigate between Contacts and Agenda via swipe
+      return
     }
     const handleOuterTouchEnd = (event) => {
-      if (!outerTouchStartX.value && !outerTouchStartY.value) return
-      const t = event.changedTouches && event.changedTouches[0]
-      if (!t) return
-      const dx = t.clientX - outerTouchStartX.value
-      const dy = Math.abs(t.clientY - outerTouchStartY.value)
-      // Reset start so we don't chain gestures
-      outerTouchStartX.value = 0
-      outerTouchStartY.value = 0
-      if (Math.abs(dx) > 80 && Math.abs(dx) > dy) {
-        const current = router.currentRoute.value.name
-        if (dx < 0 && current === 'Home') {
-          router.push({ name: 'Agenda' })
-        } else if (dx > 0 && current === 'Agenda') {
-          router.push({ name: 'Home' })
-        }
-      }
+      // Disabled - no longer navigate between Contacts and Agenda via swipe
+      return
     }
 
     // Mouse wheel and trackpad gesture support for desktop
@@ -1393,9 +1573,14 @@ export default {
         filterDropdownRef,
         toggleFilters,
         clearTags,
-        // sorting (manual only for now; kept for future)
-        sortField,
-        sortDir
+        // Bucket-based sorting
+        bucketSortSettings,
+        getBucketSort,
+        setBucketSort,
+        showSortDropdown,
+        sortDropdownRefs,
+        toggleSortDropdown,
+        setSortAndClose
       }
   }
 }
@@ -1661,8 +1846,6 @@ export default {
   padding: 0.4rem 0.35rem 0.35rem 0.35rem; /* ~30% smaller padding */
 }
 
-.top-add-row { display: flex; justify-content: center; margin-bottom: 0.5rem; }
-.add-top-btn { padding: 0.45rem 0.9rem; border-radius: 8px; }
 
 .search-wrap { display: flex; align-items: center; gap: 0.5rem; flex: 1; }
 .search-input {
@@ -1801,8 +1984,8 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 }
 
 .bucket-column {
-  min-width: 160px;
-  max-width: 180px;
+  min-width: 220px;
+  max-width: 260px;
   background-color: var(--cell-background-color);
   border-radius: 4px;
   border: 1px solid var(--border-color);
@@ -1822,6 +2005,134 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 }
 .add-icon-btn { border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.15); color: #fff; padding: 0.1rem 0.35rem; border-radius: 6px; font-weight: 700; }
 .add-icon-btn:hover { background: rgba(255,255,255,0.3); }
+
+/* Sort controls styles */
+.sort-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* Field selector button */
+.sort-field-btn {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.4);
+  color: #fff;
+  padding: 0.2rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+}
+
+.sort-field-btn:hover {
+  background: rgba(255,255,255,0.25);
+}
+
+.sort-field-icon {
+  font-size: 0.8rem;
+  line-height: 1;
+}
+
+/* Direction controls */
+.sort-direction-controls {
+  display: flex;
+  flex-direction: row;
+  gap: 0.15rem;
+}
+
+.sort-direction-btn {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.3);
+  color: rgba(255,255,255,0.7);
+  padding: 0.15rem 0.25rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  line-height: 1;
+  transition: all 0.15s ease;
+}
+
+.sort-direction-btn:hover {
+  background: rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.9);
+}
+
+.sort-direction-btn.active {
+  background: rgba(255,255,255,0.3);
+  color: #fff;
+  border-color: rgba(255,255,255,0.6);
+}
+
+/* Sort menu (dropdown) */
+.sort-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  background: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 1000;
+  min-width: 140px;
+  overflow: hidden;
+}
+
+.sort-option {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-size: 0.75rem;
+  color: var(--text-color);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sort-option:hover {
+  background: var(--cell-background-color);
+}
+
+.sort-option.active {
+  background: var(--primary-color);
+  color: white;
+}
+
+.sort-option.active:hover {
+  background: var(--primary-color);
+  opacity: 0.9;
+}
+
+/* Mobile sort adjustments */
+.mobile-sort-field-btn {
+  padding: 0.25rem 0.4rem;
+  font-size: 0.8rem;
+  min-width: 28px;
+  height: 28px;
+}
+
+.mobile-direction-controls .sort-direction-btn {
+  padding: 0.2rem 0.3rem;
+  min-width: 22px;
+  height: 22px;
+  font-size: 0.8rem;
+}
+
+.mobile-sort-menu {
+  min-width: 160px;
+}
 
 .bucket-header h3 {
   margin: 0;
@@ -1877,10 +2188,10 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 
 /* Peek/armed styling */
 .contact-cell.armed {
-  outline: 3px solid var(--primary-color);
+  outline: 2px solid var(--primary-color);
   outline-offset: -1px;
   position: relative;
-  animation: pulseOutline 0.3s ease-out;
+  animation: pulseOutline 0.15s ease-out;
 }
 
 @keyframes pulseOutline {
@@ -1889,7 +2200,7 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
     outline-offset: 0;
   }
   100% {
-    outline-width: 3px;
+    outline-width: 2px;
     outline-offset: -1px;
   }
 }
@@ -1999,15 +2310,32 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 
 /* Mobile uses same hover as tablet */
 
+.contact-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.1rem;
+  gap: 0.5rem;
+}
+
 .contact-name {
   font-weight: 600;
-  margin-bottom: 0.1rem;
   color: var(--text-color);
   font-size: 0.85rem;
   line-height: 1.2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.contact-next-visit {
+  font-size: 0.7rem;
+  color: #2980b9;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 /* Mobile uses same text styling as tablet */
 
@@ -2036,7 +2364,7 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 }
 /* Mobile uses same hostel styling as tablet */
 
-.contact-date-notes {
+.contact-notes-only {
   display: flex;
   gap: 0.5rem;
   align-items: center;
