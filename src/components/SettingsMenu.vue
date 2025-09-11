@@ -4,35 +4,56 @@
       ⚙️
     </button>
     <div v-if="open || inline" class="settings-menu" :class="{ inline }" role="menu" @click.stop>
-      <h4>Settings</h4>
+      
 
       <!-- Notifications -->
       <section class="section">
         <h5>Notifications</h5>
         <label class="row">
-          <span>Set daily reminder</span>
+          <span class="label-with-info">Set daily reminder
+            <button 
+              type="button" 
+              class="info-btn" 
+              @click="showReminderHint = !showReminderHint" 
+              :aria-expanded="showReminderHint ? 'true' : 'false'" 
+              aria-label="Daily reminder info"
+            >ⓘ</button>
+          </span>
           <input type="checkbox" v-model="dailyReminderEnabled" @change="saveLocal('dailyReminderEnabled', dailyReminderEnabled)" />
         </label>
-        <div v-if="dailyReminderEnabled" class="reminder-time-settings">
+        <div class="reminder-time-settings always">
           <div class="time-input-wrapper compact">
             <span class="time-icon">⏰</span>
             <input type="time" v-model="dailyTime" @change="saveLocal('dailyTime', dailyTime)" title="Set when you want daily reminders about your ministry work" />
             <span v-if="!dailyTime" class="time-placeholder">Time</span>
           </div>
-          <small class="hint">Reminders work for preaching days only</small>
+          <div v-if="showReminderHint" class="hint tiny">Reminders work for preaching days only</div>
+        </div>
+      </section>
+
+      <!-- Goals Manager (moved up under Notifications) -->
+      <section class="section">
+        <h5>Goals</h5>
+        <div class="row">
+          <span>Set monthly goals</span>
+          <button class="secondary small" @click="showGoals=true">Open</button>
         </div>
       </section>
 
       <!-- Reporting defaults -->
       <section class="section">
-        <h5>Report Recipient</h5>
+        <h5>Report Details</h5>
         <label class="row">
-          <span>Contact</span>
+          <span>Publisher's Name</span>
+          <input type="text" v-model="publisherName" @change="saveLocal('publisherName', publisherName)" placeholder="Your name" class="compact-input" />
+        </label>
+        <label class="row">
+          <span>Recipient's Contact</span>
           <input type="tel" v-model="recipientPhone" @change="saveLocal('recipientPhone', recipientPhone)" placeholder="0555000000" class="compact-input" />
         </label>
         <div class="via-group">
           <label class="row tight">
-            <span>Via</span>
+          <span>Via</span>
             <div class="custom-dropdown" :ref="el => viaDropdownRef = el">
               <button 
                 type="button" 
@@ -61,12 +82,25 @@
                 </button>
               </div>
             </div>
-          </label>
+        </label>
         </div>
         <label class="row">
-          <span>Report hours</span>
+          <span>Report monthly hours</span>
           <input type="checkbox" v-model="includeHours" @change="saveLocal('includeHours', includeHours)" />
         </label>
+        <label class="row">
+          <span class="label-with-info">Move leftover minutes to next month
+            <button 
+              type="button" 
+              class="info-btn" 
+              @click="showCarryHint = !showCarryHint" 
+              :aria-expanded="showCarryHint ? 'true' : 'false'" 
+              aria-label="Rounding policy info"
+            >ⓘ</button>
+          </span>
+          <input type="checkbox" v-model="moveLeftoverToNextMonth" @change="saveLocal('moveLeftoverToNextMonth', moveLeftoverToNextMonth)" />
+        </label>
+        <div v-if="showCarryHint" class="hint tiny">If off: leftover minutes will be rounded to the nearest hour (≥30 up).</div>
         <label class="row">
           <span>Remind to submit report</span>
           <input type="checkbox" v-model="monthEnd" @change="saveLocal('monthEnd', monthEnd)" />
@@ -81,6 +115,8 @@
           <button class="secondary small" @click="openArchivedModal">View</button>
         </div>
       </section>
+
+      
 
       <!-- Appearance (last but one) -->
       <section class="section">
@@ -187,7 +223,7 @@
                   </button>
                 </div>
               </div>
-            </div>
+        </div>
             
             <div class="form-actions">
               <button type="button" class="btn-secondary-pro" @click="showLoginForm=false">
@@ -240,16 +276,20 @@
       </div>
     </div>
   </div>
+
+  <GoalsManager :open="showGoals" @close="showGoals=false" @saved="onGoalsSaved" />
 </template>
 
 <script>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { authService } from '../services/authService.js'
+import GoalsManager from './reports/GoalsManager.vue'
 import { db, contactService } from '../services/db.js'
 import { notificationService } from '../services/notificationService.js'
 
 export default {
   name: 'SettingsMenu',
+  components: { GoalsManager },
   props: { inline: { type: Boolean, default: false } },
   setup(props) {
     const open = ref(props.inline)
@@ -262,6 +302,7 @@ export default {
     const error = ref('')
     const message = ref('')
     const showLoginForm = ref(false)
+    const showGoals = ref(false)
     
     // Archived contacts
     const showArchivedModal = ref(false)
@@ -274,8 +315,13 @@ export default {
     const dailyTime = ref(localStorage.getItem('dailyTime') || '07:00')
     const monthEnd = ref(localStorage.getItem('monthEnd') === null ? true : localStorage.getItem('monthEnd') === 'true')
     const recipientPhone = ref(localStorage.getItem('recipientPhone') || '')
+    const recipientName = ref(localStorage.getItem('recipientName') || '')
     const shareChannel = ref(localStorage.getItem('shareChannel') || 'whatsapp')
     const includeHours = ref(localStorage.getItem('includeHours') === null ? true : localStorage.getItem('includeHours') === 'true')
+    const moveLeftoverToNextMonth = ref(localStorage.getItem('moveLeftoverToNextMonth') === 'true')
+    const publisherName = ref(localStorage.getItem('publisherName') || '')
+    const showCarryHint = ref(false)
+    const showReminderHint = ref(false)
 
     // Custom dropdown states
     const showThemeDropdown = ref(false)
@@ -422,6 +468,9 @@ export default {
       if (localStorage.getItem('monthEnd') === null) {
         saveLocal('monthEnd', true)
       }
+      if (localStorage.getItem('moveLeftoverToNextMonth') === null) {
+        saveLocal('moveLeftoverToNextMonth', false)
+      }
 
       // Attach outside-click listener for dropdowns always, and for menu close when not inline
       document.addEventListener('click', onDocClick)
@@ -446,7 +495,7 @@ export default {
 
     onBeforeUnmount(() => {
       // Always remove the click listener since we always add it now
-      document.removeEventListener('click', onDocClick)
+        document.removeEventListener('click', onDocClick)
       
       // Clean up refresh listeners for inline mode
       if (props.inline && window.__rv_refreshArchived) {
@@ -456,14 +505,22 @@ export default {
       }
     })
 
+    const onGoalsSaved = () => {
+      window.dispatchEvent(new CustomEvent('rv:report:updated'))
+    }
+
     return { 
       inline: props.inline, open, rootRef, user, email, password, showPassword, loading, error, message, 
-      theme, dailyReminderEnabled, dailyTime, monthEnd, recipientPhone, shareChannel, includeHours, 
+      theme, dailyReminderEnabled, dailyTime, monthEnd, recipientPhone, recipientName, shareChannel, includeHours, moveLeftoverToNextMonth, publisherName, showCarryHint,
       submit, signOut, applyTheme, saveLocal, showLoginForm,
       // Custom dropdowns
       showThemeDropdown, showViaDropdown, themeDropdownRef, viaDropdownRef, selectTheme, selectVia,
       // Archived contacts
-      showArchivedModal, archivedContacts, archivedCount, restoreContact, openArchivedModal
+      showArchivedModal, archivedContacts, archivedCount, restoreContact, openArchivedModal,
+      // Goals
+      showGoals, onGoalsSaved,
+      // Hints
+      showReminderHint
     }
   }
 }
@@ -482,6 +539,9 @@ input, select { border: 1px solid var(--border-color,#ddd); border-radius: 6px; 
 button.secondary { background: transparent; border: 1px solid var(--border-color,#ddd); color: inherit; }
 .muted { color: #666; }
 .hint { color: #666; font-size: 0.9rem; }
+.hint.tiny { font-size: 0.75rem; color: #777; margin-top: 0.25rem; }
+.label-with-info { display: inline-flex; align-items: center; gap: 0.35rem; }
+.info-btn { background: none; border: none; color: #666; font-size: 0.85rem; cursor: pointer; padding: 0; }
 .error { color: #e74c3c; }
 .message { color: #27ae60; }
 
@@ -533,17 +593,13 @@ button.secondary { background: transparent; border: 1px solid var(--border-color
 }
 
 /* Reminder time settings */
-.reminder-time-settings {
-  margin-left: 1rem;
-  margin-top: 0.5rem;
-  padding: 0.5rem 0;
-  border-left: 2px solid var(--border-color, #eee);
-  padding-left: 0.75rem;
-}
+.reminder-time-settings { margin-left: 1rem; margin-top: 0.5rem; padding: 0.5rem 0; border-left: 2px solid var(--border-color, #eee); padding-left: 0.75rem; }
+.reminder-time-settings.always { margin-left: 0; border-left: none; display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; }
 
 /* Compact input */
 .compact-input {
-  max-width: 120px;
+  max-width: 144px;
+  padding: 0.48rem 0.6rem;
 }
 
 /* Via group - tighter spacing */

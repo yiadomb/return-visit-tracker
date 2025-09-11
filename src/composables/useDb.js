@@ -1,6 +1,6 @@
 import { ref, computed, onMounted, onActivated, onUnmounted } from 'vue'
 import { liveQuery } from 'dexie'
-import { contactService, BUCKETS, MINISTRY_TAGS, OUTCOMES, db } from '../services/db.js'
+import { contactService, occurrenceService, BUCKETS, MINISTRY_TAGS, OUTCOMES, db } from '../services/db.js'
 import { notificationService } from '../services/notificationService.js'
 import { syncService } from '../services/syncService.js'
 
@@ -42,6 +42,16 @@ export function useContacts() {
     error.value = null
     try {
       const newContact = await contactService.create(contactData)
+      // Create initial occurrence if next_visit_at provided
+      if (contactData.next_visit_at) {
+        try {
+          await occurrenceService.addOrIgnore({
+            contact_id: newContact.id,
+            scheduled_at: contactData.next_visit_at,
+            reminders: contactData.reminders
+          })
+        } catch (e) { console.warn('Failed to create initial occurrence', e) }
+      }
       // Trigger cloud sync (non-blocking)
       syncService.syncAll().catch(err => console.warn('Sync after add failed:', err))
       
@@ -68,7 +78,13 @@ export function useContacts() {
       const index = contacts.value.findIndex(contact => contact.id === id)
       const oldContact = index !== -1 ? { ...contacts.value[index] } : null
       
-      const updatedContact = await contactService.update(id, { ...changes, updated_at: new Date().toISOString() })
+      const safeChanges = { ...changes, updated_at: new Date().toISOString() }
+      // Prevent accidental occurrence upsert when editing general fields
+      if (safeChanges.next_visit_at && !safeChanges.time_explicitly_set) {
+        delete safeChanges.next_visit_at
+      }
+      const updatedContact = await contactService.update(id, safeChanges)
+      // Occurrences are created via Set/Add buttons; avoid duplicating here
       // Trigger cloud sync (non-blocking)
       syncService.syncAll().catch(err => console.warn('Sync after update failed:', err))
       if (index !== -1) {

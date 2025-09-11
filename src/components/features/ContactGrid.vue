@@ -36,10 +36,21 @@
       </div>
       <!-- Chips (Days) shown only on phones) -->
       <div v-if="isMobile" class="chips-collapsible">
-        <button class="chips-toggle full-width" @click="chipsExpanded = !chipsExpanded" :aria-expanded="chipsExpanded">
-          <span>Days</span>
-          <span class="chev" :class="{ open: chipsExpanded }">▾</span>
-        </button>
+        <div class="chips-header">
+          <button class="chips-toggle" @click="chipsExpanded = !chipsExpanded" :aria-expanded="chipsExpanded">
+            <span>Days</span>
+            <span class="chev" :class="{ open: chipsExpanded }">▾</span>
+          </button>
+          <button class="calendar-btn" @click="openCalendar" title="Open calendar">
+            <span class="cal-label">{{ currentCalendarLabel }}</span>
+          </button>
+          <input 
+            type="date" 
+            ref="hiddenDateInput" 
+            @change="handleCalendarDate"
+            style="position: absolute; left: -9999px; opacity: 0; pointer-events: none;"
+          />
+        </div>
         <div v-show="chipsExpanded" class="mobile-day-chips toolbar-chips">
           <div class="chips-row">
       <button 
@@ -165,6 +176,7 @@
 
               <div 
                 class="contact-cell"
+                :data-mirrored="contact.__mirrored === true ? '1' : null"
                 :draggable="!isPhone && !isAnyCellEditing"
                 @dragstart="handleDragStart($event, contact)"
                 @dragend="handleDragEnd"
@@ -180,7 +192,7 @@
                   </div>
                   <!-- Next visit date on the right -->
                   <div class="contact-next-visit" v-if="contact.next_visit_at">
-                    {{ formatDate(contact.next_visit_at, contact) }}
+                    {{ formatDate(contact.next_visit_at) }}
                   </div>
                 </div>
                 <div class="contact-hostel" :style="getHostelStyle(contact.hostel_name)">
@@ -302,6 +314,7 @@
                 v-for="contact in getBucketContacts(bucket)" 
                 :key="contact.id"
                 class="contact-cell"
+                :data-mirrored="contact.__mirrored === true ? '1' : null"
                 :draggable="false"
                 @click="armPreview(contact, $event)"
                 @touchstart.passive="onTouchStartCell(contact, $event)"
@@ -352,27 +365,33 @@
       :loading="saving"
       @close="closeDrawer"
       @save="handleSaveContact"
+      @update-field="handleUpdateField"
       @delete="handleDeleteContact"
       @archive="handleArchiveContact"
       @toggle-edit="switchToEdit"
       @move="handleMoveDay"
+      @add-occurrence="handleAddOccurrence"
     />
     <!-- Phone action sheet -->
     <div v-if="actionSheetVisible" class="move-sheet-overlay" @click="closeActionSheet">
       <div class="move-sheet" @click.stop>
         <h4>Contact Actions</h4>
         <div class="action-sheet-buttons">
-          <button class="action-sheet-btn" @click="showMoveSheet">
+          <button class="action-sheet-btn" @click="showMoveSheet" v-if="pendingMoveContact">
             <span class="action-icon">↔️</span>
             Move to another day
           </button>
-          <button class="action-sheet-btn" @click="archivePendingContact">
+          <button class="action-sheet-btn" @click="archivePendingContact" v-if="pendingMoveContact && !pendingMoveContact.__mirrored">
             <span class="action-icon">📥</span>
             Archive
           </button>
-          <button class="action-sheet-btn danger" @click="deletePendingContact">
+          <button class="action-sheet-btn danger" @click="deletePendingContact()" v-if="pendingMoveContact && !pendingMoveContact.__mirrored">
             <span class="action-icon">❌</span>
             Delete
+          </button>
+          <button class="action-sheet-btn danger" @click="removeOccurrenceForPending()" v-if="pendingMoveContact && pendingMoveContact.__mirrored">
+            <span class="action-icon">🗑️</span>
+            Remove from this day
           </button>
         </div>
       </div>
@@ -396,6 +415,8 @@
 <script>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useContacts } from '../../composables/useDb.js'
+import { db, occurrenceService } from '../../services/db.js'
+import { liveQuery } from 'dexie'
 import ContactDrawer from './ContactDrawer.vue'
 import { getHostelColors } from '../../utils/hostelColor.js'
 import router from '../../router/index.js'
@@ -407,6 +428,8 @@ export default {
   },
   setup() {
     const { contacts, BUCKETS, addContact, updateContact, deleteContact, MINISTRY_TAGS } = useContacts()
+    const occurrences = ref([])
+    let occSub = null
     
     // Responsive state
     const isMobile = ref(false)
@@ -415,6 +438,7 @@ export default {
     const selectedBucket = ref('')
     const columnsContainer = ref(null)
     const chipsExpanded = ref(false)
+    const hiddenDateInput = ref(null)
     const chipRow1 = computed(() => ['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'])
     const chipRow2 = computed(() => ['Flexible','NotAtHomes','Others'])
     const selectMobileDay = (bucket) => {
@@ -443,6 +467,30 @@ export default {
       const idx = Math.min(Math.max(carouselIndex.value, 0), BUCKETS.length - 1)
       selectedBucket.value = BUCKETS[idx]
     }
+    
+    // Dynamic calendar label (mobile only): shows date for the current bucket within the current/next week
+    const currentCalendarLabel = computed(() => {
+      if (!isMobile.value) return '📅'
+      const bucket = selectedBucket.value || BUCKETS[carouselIndex.value]
+      const dayIndex = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].indexOf(bucket)
+      if (dayIndex < 0) return '📅'
+      const now = new Date()
+      const todayIndex = now.getDay()
+      const startOfWeek = new Date(now)
+      startOfWeek.setHours(0,0,0,0)
+      // Week starts on Sunday
+      startOfWeek.setDate(startOfWeek.getDate() - todayIndex)
+      // If the requested day is before today in this week, roll to next week
+      const base = new Date(startOfWeek)
+      let offset = dayIndex
+      if (dayIndex < todayIndex) {
+        offset += 7
+      }
+      base.setDate(startOfWeek.getDate() + offset)
+      // Label as e.g., Sept 1
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sept','Oct','Nov','Dec']
+      return `${months[base.getMonth()]} ${base.getDate()}`
+    })
     
     // Touch/swipe state
     const touchStartX = ref(0)
@@ -488,8 +536,9 @@ export default {
       clearTimeout(touchTimer)
       touchTimer = setTimeout(() => {
         if (!movedBeyondThreshold.value) {
-          if (isPhone.value) {
-            pendingMoveContact.value = contact
+          // Always show action sheet on phones. On larger screens, only for originals.
+          if (isPhone.value || (!isPhone.value && !contact.__mirrored)) {
+            pendingMoveContact.value = contact.__mirrored ? { ...contact } : contact
             actionSheetVisible.value = true
             longPressTriggered.value = true
           } else {
@@ -693,6 +742,64 @@ export default {
     const getBucketContacts = (bucket) => {
       let list = contacts.value.filter(contact => contact.bucket === bucket && !contact.archived)
 
+      // Mirror contacts into weekday buckets if they have occurrences on that weekday
+      const weekdayIndex = {
+        'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+      }
+      const isRealDay = Object.prototype.hasOwnProperty.call(weekdayIndex, bucket)
+      if (isRealDay) {
+        const dayNum = weekdayIndex[bucket]
+        const seenIds = new Set(list.map(c => c.id))
+        const now = new Date()
+
+        const getNextDateForDayTime = (timeStr) => {
+          if (!timeStr) return ''
+          // Compute next date for this weekday at provided HH:mm
+          const [hh, mm] = String(timeStr).split(':').map(v => parseInt(v || 0, 10))
+          const today = new Date()
+          const todayDay = today.getDay()
+          let diff = (dayNum - todayDay + 7) % 7
+          const candidate = new Date(today)
+          candidate.setHours(hh || 0, mm || 0, 0, 0)
+          if (diff === 0 && candidate <= today) {
+            diff = 7
+          }
+          if (diff !== 0) {
+            candidate.setDate(candidate.getDate() + diff)
+          }
+          return candidate.toISOString()
+        }
+
+        // For original bucket contacts, show the time from occurrence; otherwise fall back to bucket_time if set
+        list = list.map(c => {
+          const occs = occurrences.value
+            .filter(o => o.contact_id === c.id)
+            .map(o => ({ o, d: new Date(o.scheduled_at) }))
+            .filter(x => x.d.getDay() === dayNum && x.d >= now)
+            .sort((a, b) => a.d - b.d)
+          const occ = occs[0]?.o
+          if (occ) {
+            return { ...c, next_visit_at: occ.scheduled_at, __displayed_at: occ.scheduled_at }
+          }
+          // No occurrence for this weekday → use the contact's bucket_time if available
+          const iso = getNextDateForDayTime(c.bucket_time)
+          return { ...c, next_visit_at: iso }
+        })
+
+        // Add mirrored entries for contacts whose bucket is different but have an occurrence on this weekday
+        for (const occ of occurrences.value) {
+          const d = new Date(occ.scheduled_at)
+          if (d.getDay() !== dayNum) continue
+          if (d < now) continue
+          const c = contacts.value.find(x => x.id === occ.contact_id)
+          if (!c || c.archived) continue
+          if (!seenIds.has(c.id)) {
+            list.push({ ...c, next_visit_at: occ.scheduled_at, __mirrored: true, __displayed_at: occ.scheduled_at })
+            seenIds.add(c.id)
+          }
+        }
+      }
+
       // Search by name or hostel (AND with tag filters)
       if (searchQuery.value) {
         list = list.filter(c => {
@@ -757,53 +864,29 @@ export default {
       return list
     }
 
-    // Format date for display with relative dates and time (time only for nearby dates and when explicitly set)
-    const formatDate = (dateString, contact = null) => {
+    // Format for buckets: always show time; prepend "Today " when same day
+    const formatDate = (dateString) => {
       if (!dateString) return ''
-      
       const date = new Date(dateString)
       const today = new Date()
-      
-      // Check if time was explicitly set by user (default to true for backward compatibility)
-      const showTime = !contact || contact.time_explicitly_set !== false
-      
-      // Reset time to compare dates only
-      const resetTime = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
-      const targetDate = resetTime(date)
-      const todayDate = resetTime(today)
-      
-      // Calculate difference in days
-      const diffTime = targetDate.getTime() - todayDate.getTime()
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
-      
-      // Get time in 12-hour format (only for nearby dates and when explicitly set)
-      const timeStr = showTime ? ` ${date.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit',
-        hour12: true 
-      })}` : ''
-      
-      // Return relative dates with time for nearby dates (within a week)
-      if (diffDays === 0) return `Today${timeStr}`
-      if (diffDays === 1) return `Tomorrow${timeStr}`
-      if (diffDays === -1) return `Yesterday${timeStr}`
-      
-      // For dates within the current week, show day names
-      if (diffDays >= 2 && diffDays <= 6) {
-        const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
-        return `${dayName}${timeStr}`
-      }
-      if (diffDays <= -2 && diffDays >= -6) {
-        const dayName = date.toLocaleDateString('en-US', { weekday: 'long' })
-        return `${dayName}${timeStr}`
-      }
-      
-      // For dates further away (more than a week), show only the date
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric' 
-      })
+      const isSameDay = date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth() && date.getDate() === today.getDate()
+      const timeStr = date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+      return isSameDay ? `Today ${timeStr}` : timeStr
     }
+
+    const getWeekBounds = () => {
+      const now = new Date()
+      const start = new Date(now)
+      start.setHours(0,0,0,0)
+      // Week starts on Sunday
+      start.setDate(start.getDate() - start.getDay())
+      const end = new Date(start)
+      end.setDate(start.getDate() + 6)
+      end.setHours(23,59,59,999)
+      return { start, end }
+    }
+
+    // getExtraCount removed per updated UX
 
     // Drawer actions
     const openContactDrawer = (contact) => {
@@ -872,9 +955,15 @@ export default {
     
     const deletePendingContact = async () => {
       if (!pendingMoveContact.value) return
+      const c = pendingMoveContact.value
+      if (c.__mirrored && c.__displayed_at) {
+        // Mirrored: act like remove for this day only
+        await removeOccurrenceForPending()
+        return
+      }
       if (confirm('Are you sure you want to delete this contact?')) {
         try {
-          await deleteContact(pendingMoveContact.value.id)
+          await deleteContact(c.id)
         } finally {
           closeActionSheet()
         }
@@ -886,6 +975,21 @@ export default {
         await updateContact(pendingMoveContact.value.id, { bucket })
       } finally {
         closeMoveSheet()
+      }
+    }
+
+    const removeOccurrenceForPending = async () => {
+      if (!pendingMoveContact.value) return
+      try {
+        const contact = pendingMoveContact.value
+        if (!contact.__mirrored || !contact.__displayed_at) return
+        const occs = occurrences.value.filter(o => o.contact_id === contact.id)
+        const targetMs = new Date(contact.__displayed_at).getTime()
+        const toDelete = occs.filter(o => new Date(o.scheduled_at).getTime() === targetMs)
+        if (toDelete.length === 0) return
+        await db.visitOccurrences.bulkDelete(toDelete.map(o => o.id))
+      } finally {
+        closeActionSheet()
       }
     }
 
@@ -1043,6 +1147,27 @@ export default {
       return bucket
     }
 
+    // Calendar functionality
+    const openCalendar = () => {
+      if (hiddenDateInput.value) {
+        hiddenDateInput.value.click()
+      }
+    }
+
+    const handleCalendarDate = (event) => {
+      const selectedDate = event.target.value
+      if (selectedDate) {
+        const date = new Date(selectedDate)
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+        const dayName = dayNames[date.getDay()]
+        
+        // Navigate to that day if it's a weekday bucket
+        if (BUCKETS.includes(dayName)) {
+          selectMobileDay(dayName)
+        }
+      }
+    }
+
     // Handle save contact (add or edit)
     const handleSaveContact = async (contactData) => {
       saving.value = true
@@ -1061,6 +1186,27 @@ export default {
         alert('Error saving contact. Please try again.')
       } finally {
         saving.value = false
+      }
+    }
+    
+    // Add an additional scheduled date (occurrence) without closing the drawer
+    const handleAddOccurrence = async ({ next_visit_at, reminders }) => {
+      if (!selectedContact.value || !selectedContact.value.id) return
+      try {
+        await updateContact(selectedContact.value.id, { next_visit_at, reminders })
+      } catch (error) {
+        console.error('Error adding occurrence:', error)
+        alert('Error adding date. Please try again.')
+      }
+    }
+
+    // Handle inline field updates from drawer (e.g., bucket_time)
+    const handleUpdateField = async (changes) => {
+      if (!selectedContact.value || !selectedContact.value.id) return
+      try {
+        await updateContact(selectedContact.value.id, changes)
+      } catch (error) {
+        console.error('Error updating contact field:', error)
       }
     }
 
@@ -1218,6 +1364,17 @@ export default {
     // Lifecycle
     onMounted(() => {
       checkMobile()
+      // Jump to today's day on load (mobile or desktop)
+      try {
+        const todayIndex = new Date().getDay() // 0=Sun..6=Sat
+        const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday']
+        const todayBucket = dayNames[todayIndex]
+        const idx = BUCKETS.indexOf(todayBucket)
+        if (idx >= 0) {
+          carouselIndex.value = Math.min(Math.max(idx, 0), Math.max(BUCKETS.length - 1, 0))
+          syncSelectedToIndex()
+        }
+      } catch {}
       isTouchDevice.value = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0)
       window.addEventListener('resize', checkMobile)
       // Close filters on outside click
@@ -1231,6 +1388,15 @@ export default {
       document.addEventListener('click', onDocClick)
       // Store to remove later
       window.__rv_onDocClick = onDocClick
+      // Subscribe to occurrences for mirroring in buckets
+      try {
+        occSub = liveQuery(() => db.visitOccurrences.toArray()).subscribe({
+          next: (rows) => { occurrences.value = rows || [] },
+          error: (e) => { console.warn('occurrences liveQuery (grid) error', e) }
+        })
+      } catch (e) {
+        console.warn('Failed to subscribe occurrences in grid')
+      }
     })
 
     // Drag and drop handlers
@@ -1279,32 +1445,50 @@ export default {
     const handleDrop = async (event, targetBucket) => {
       event.preventDefault()
       
-      if (!draggedContact.value || draggedContact.value.bucket === targetBucket) {
+      if (!draggedContact.value) {
         draggedContact.value = null
         dragOverBucket.value = null
         return
       }
 
-      const contactName = draggedContact.value.name
-      
+      const source = draggedContact.value
+      const contactName = source.name
+      const now = new Date()
+
       try {
-        const result = await updateContact(draggedContact.value.id, { bucket: targetBucket })
-        console.log(`✅ Successfully moved ${contactName} to ${targetBucket}`, result)
-        
-        // Only show success feedback if needed (could add a subtle toast instead)
-        // console.log('Drag and drop completed successfully')
-        
-      } catch (error) {
-        console.error('❌ Error moving contact:', error)
-        
-        // Only show error if it's a real failure
-        if (error && error.message) {
-          alert(`Error moving ${contactName}: ${error.message}`)
+        if (source.__mirrored && source.__displayed_at) {
+          // Move only the occurrence represented by this mirrored card to the new weekday bucket
+          const targetDayIndex = {
+            'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+          }[targetBucket]
+          if (targetDayIndex == null) throw new Error('Invalid target day')
+
+          // Compute new datetime: nearest future date of target weekday, preserving the time from the occurrence
+          const src = new Date(source.__displayed_at)
+          const time = { h: src.getHours(), m: src.getMinutes() }
+          const candidate = new Date(now)
+          candidate.setHours(time.h, time.m, 0, 0)
+          while (candidate.getDay() !== targetDayIndex || candidate <= now) {
+            candidate.setDate(candidate.getDate() + 1)
+          }
+
+          // Find the exact occurrence by contact_id + scheduled_at and update instead of delete+recreate
+          const occs = occurrences.value.filter(o => o.contact_id === source.id)
+          const targetMs = new Date(source.__displayed_at).getTime()
+          const match = occs.find(o => new Date(o.scheduled_at).getTime() === targetMs)
+          if (!match) throw new Error('Occurrence not found')
+          await occurrenceService.update(match.id, { scheduled_at: candidate.toISOString() })
         } else {
-          console.warn('Unknown error during drag and drop, but operation may have succeeded')
+          // Original card drag: move the contact's bucket
+          if (source.bucket !== targetBucket) {
+            await updateContact(source.id, { bucket: targetBucket })
+          }
         }
+        console.log(`✅ Moved ${contactName} to ${targetBucket}`)
+      } catch (error) {
+        console.error('❌ Error moving:', error)
+        alert(error?.message || 'Move failed')
       } finally {
-        // Always clean up state
         draggedContact.value = null
         dragOverBucket.value = null
       }
@@ -1452,6 +1636,7 @@ export default {
         document.removeEventListener('click', window.__rv_onDocClick)
         delete window.__rv_onDocClick
       }
+      try { occSub?.unsubscribe() } catch {}
     })
 
           return {
@@ -1511,6 +1696,13 @@ export default {
         selectDay,
         getShortDayName,
         getSpecialLabel,
+        
+        // Calendar
+        hiddenDateInput,
+        openCalendar,
+        handleCalendarDate,
+        currentCalendarLabel,
+        
         handleSaveContact,
         handleDeleteContact,
         handleArchiveContact,
@@ -1523,6 +1715,8 @@ export default {
         handleMoveDayFromSheet,
         archivePendingContact,
         deletePendingContact,
+        removeOccurrenceForPending,
+        pendingMoveContact,
         
         // Drag and drop methods
         handleDragStart,
@@ -1628,21 +1822,55 @@ export default {
   padding: 0 0.75rem; 
   overflow: hidden; /* Don't let expanded content push layout */
 }
-.chips-toggle {
+.chips-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   margin: 0.25rem 0 0.1rem 0;
+}
+
+.chips-toggle {
   padding: 0.25rem 0.5rem;
   border: 1px solid var(--border-color);
-  background: white;
+  background: #e8f5e8;
   color: var(--text-color);
   border-radius: 6px;
   cursor: pointer;
-}
-.chips-toggle.full-width {
-  width: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
-  justify-content: center; /* center the Days toggle */
-  gap: 0.15rem; /* bring chevron closer */
+  justify-content: center;
+  gap: 0.15rem;
+  height: 28px;
+}
+
+.calendar-btn {
+  padding: 0.05rem 0.4rem; /* match filter button */
+  border: 1px solid var(--border-color);
+  background: #e8f5e8;
+  color: var(--text-color);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px; /* match filter button */
+  min-width: 64px; /* match filter button */
+  flex: 0 0 auto;
+}
+
+.calendar-btn .cal-label {
+  font-weight: normal;
+  letter-spacing: 0.2px;
+}
+
+.calendar-btn:hover,
+.calendar-btn:active,
+.calendar-btn:focus {
+  background: #e8f5e8;
+  color: var(--text-color);
+  border-color: var(--border-color);
+  outline: none;
 }
 .chips-toggle .chev { display: inline-block; transition: transform 0.2s ease; margin-left: 0.15rem; }
 .chips-toggle .chev.open { transform: rotate(180deg); }
@@ -1839,23 +2067,26 @@ export default {
 }
 
 .controls-panel {
-  background: #eef5fb;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  margin: 0.35rem 0.35rem 0.4rem 0.35rem; /* ~30% smaller margins */
-  padding: 0.4rem 0.35rem 0.35rem 0.35rem; /* ~30% smaller padding */
+  background: transparent; /* remove rectangle */
+  border: none;
+  border-radius: 0;
+  margin: 0 0.25rem; /* bring closer to content */
+  padding: 0; /* no inner padding */
 }
 
 
-.search-wrap { display: flex; align-items: center; gap: 0.5rem; flex: 1; }
+.search-wrap { display: flex; align-items: center; gap: 0.1rem; flex: 1 1 auto; }
 .search-input {
   width: 100%;
-  max-width: 200px; /* trimmed further */
-  padding: 0.18rem 0.48rem; /* tighter height */
+  /* Fill like Days toggle length */
+  padding: 0 0.1rem;
+  height: 28px; /* match Days toggle height */
   border: 1px solid var(--border-color);
   border-radius: 6px;
+  background: #eef5fb; /* match chips bg */
   font-size: 0.95rem;
   line-height: 1.05;
+  box-sizing: border-box;
 }
 .search-input::placeholder { text-align: center; }
 .search-input:placeholder-shown { text-align: center; }
@@ -1864,14 +2095,19 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 
 .toolbar-actions { position: relative; }
 .filter-btn {
-  padding: 0.3rem 0.6rem; /* match search height */
+  padding: 0.05rem 0.1rem; /* match calendar */
+  height: 28px; /* match calendar */
+  min-width: 64px; /* match calendar */
   border: 1px solid var(--border-color);
-  background: white;
+  background: #eef5fb; /* match chips bg */
   color: var(--text-color);
   border-radius: 6px;
   cursor: pointer;
+  box-sizing: border-box;
 }
-.filter-btn:hover { background: var(--cell-background-color); }
+.filter-btn:hover,
+.filter-btn:active,
+.filter-btn:focus { background: #eef5fb; color: var(--text-color); border-color: var(--border-color); }
 .dropdown { position: relative; display: inline-block; }
 .filter-menu {
   position: absolute;
@@ -1967,7 +2203,7 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
     width: 8px !important;
     height: 8px !important;
   }
-  
+
   .mobile-contacts-in-bucket::-webkit-scrollbar-track {
     background: rgba(0, 0, 0, 0.1) !important;
     border-radius: 4px !important;
@@ -2184,7 +2420,23 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   display: flex;
   flex-direction: column;
   justify-content: center;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
 }
+
+/* Visual indicator for mirrored (duplicated) occurrences in day buckets */
+.contact-cell[data-mirrored="1"] {
+  border: 1px solid transparent;
+  border-image: repeating-linear-gradient(90deg, #3498db 0 8px, rgba(0,0,0,0) 8px 14px) 1;
+  background: var(--cell-background-color);
+  position: relative;
+}
+/* +N small badge */
+/* extra-count removed */
 
 /* Peek/armed styling */
 .contact-cell.armed {
@@ -2264,6 +2516,10 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
   border-top-right-radius: 12px;
   padding: 0.75rem;
   box-shadow: 0 -6px 16px rgba(0,0,0,0.15);
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  -webkit-touch-callout: none;
 }
 .move-sheet h4 {
   margin: 0 0 0.5rem 0;

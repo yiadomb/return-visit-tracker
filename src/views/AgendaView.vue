@@ -6,6 +6,26 @@
     </div>
 
     <div class="agenda-content">
+      <section class="agenda-notes" aria-label="Notes">
+        <div class="notes-header">
+          <h3>Notes</h3>
+        </div>
+        <div class="notes-editor">
+          <div class="toolbar" ref="toolbarRef">
+            <button @click="exec('bold')"><b>B</b></button>
+            <button @click="exec('italic')"><i>I</i></button>
+            <button @click="applyHeading(1)">H1</button>
+            <button @click="applyHeading(2)">H2</button>
+            <button @click="applyHeading(3)">H3</button>
+            <button @click="toggleList('ul')">• List</button>
+            <button @click="toggleList('ol')">1. List</button>
+            <button @click="toggleChecklist()">☑ Checklist</button>
+            <button @click="undo()">↶</button>
+            <button @click="redo()">↷</button>
+          </div>
+          <div class="editor" ref="editorRef" contenteditable="true" @input="onEdit" :placeholder="'Write your notes…'"></div>
+        </div>
+      </section>
       <div v-if="loading" class="loading-state">
         Loading today's visits...
       </div>
@@ -75,18 +95,21 @@
       @close="closeDrawer"
       @save="handleSaveContact"
       @delete="handleDeleteContact"
+      @add-occurrence="handleAddOccurrence"
     />
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, onUnmounted } from 'vue'
+import { notesService, db } from '../services/db.js'
 import ContactDrawer from '../components/features/ContactDrawer.vue'
 import { useContacts } from '../composables/useDb'
 import { notificationService } from '../services/notificationService'
 import { getHostelColors } from '../utils/hostelColor.js'
 import router from '../router'
 import { usePullToRefresh } from '../composables/usePullToRefresh.js'
+import { liveQuery } from 'dexie'
 
 export default {
   name: 'AgendaView',
@@ -94,7 +117,45 @@ export default {
     ContactDrawer
   },
   setup() {
+    // Notes state (always visible, centered)
+    const editorRef = ref(null)
+    const toolbarRef = ref(null)
+    const lastSavedHtml = ref('')
+    const saveTimer = ref(null)
+
+    const loadNotes = async () => {
+      const list = await notesService.list()
+      const first = list[0]
+      lastSavedHtml.value = first?.html || ''
+      await nextTick()
+      if (editorRef.value) editorRef.value.innerHTML = lastSavedHtml.value
+    }
+
+    const onEdit = () => {
+      clearTimeout(saveTimer.value)
+      saveTimer.value = setTimeout(async () => {
+        const html = editorRef.value?.innerHTML || ''
+        if (html === lastSavedHtml.value) return
+        const list = await notesService.list()
+        if (list.length === 0) {
+          const created = await notesService.create({ html })
+          lastSavedHtml.value = created?.html || html
+        } else {
+          await notesService.update(list[0].id, { html })
+          lastSavedHtml.value = html
+        }
+      }, 400)
+    }
+
+    const exec = (cmd) => document.execCommand(cmd, false, null)
+    const applyHeading = (level) => document.execCommand('formatBlock', false, 'H' + level)
+    const toggleList = (type) => document.execCommand(type === 'ul' ? 'insertUnorderedList' : 'insertOrderedList', false, null)
+    const toggleChecklist = () => document.execCommand('insertUnorderedList', false, null)
+    const undo = () => document.execCommand('undo', false, null)
+    const redo = () => document.execCommand('redo', false, null)
     const { contacts, updateContact, deleteContact } = useContacts()
+    const occurrences = ref([])
+    let occSubscription = null
     
     // State
     const loading = ref(true)
@@ -118,21 +179,27 @@ export default {
       })
     })
 
-    // Filter contacts for today's visits
+    // Derive today's visits from occurrences joined to contacts
     const todaysVisits = computed(() => {
-      return contacts.value
-        .filter(contact => {
-          if (!contact.next_visit_at) return false
-          const visitDate = new Date(contact.next_visit_at).toISOString().split('T')[0]
-          return visitDate === todayDateString
-        })
-        .sort((a, b) => {
-          // Sort by visit time if available, otherwise by name
-          if (a.next_visit_at && b.next_visit_at) {
-            return new Date(a.next_visit_at) - new Date(b.next_visit_at)
-          }
-          return a.name.localeCompare(b.name)
-        })
+      // Build contact map for quick join
+      const byId = new Map(contacts.value.map(c => [c.id, c]))
+      const todayOccs = occurrences.value.filter(o => {
+        const d = new Date(o.scheduled_at).toISOString().split('T')[0]
+        return d === todayDateString && o.status !== 'cancelled'
+      })
+      const items = []
+      for (const occ of todayOccs) {
+        const c = byId.get(occ.contact_id)
+        if (!c) continue
+        // Clone contact and override next_visit_at for display/sorting
+        items.push({ ...c, next_visit_at: occ.scheduled_at })
+      }
+      return items.sort((a, b) => {
+        if (a.next_visit_at && b.next_visit_at) {
+          return new Date(a.next_visit_at) - new Date(b.next_visit_at)
+        }
+        return a.name.localeCompare(b.name)
+      })
     })
 
     // Format visit time
@@ -207,6 +274,20 @@ export default {
       }
     }
 
+    // Add an occurrence from within the drawer and refresh in-place
+    const handleAddOccurrence = async ({ next_visit_at, reminders }) => {
+      if (!selectedContact.value || !selectedContact.value.id) return
+      try {
+        saving.value = true
+        await updateContact(selectedContact.value.id, { next_visit_at, reminders })
+        // keep drawer open; selectedContact will be updated by reactive contacts list
+      } catch (err) {
+        console.warn('Failed to add occurrence in AgendaView', err)
+      } finally {
+        saving.value = false
+      }
+    }
+
     const handleDeleteContact = async (contactId) => {
       saving.value = true
       try {
@@ -235,11 +316,27 @@ export default {
         console.warn('Failed to initialize notifications in AgendaView:', error)
       }
 
+      // Subscribe to occurrence changes (live)
+      try {
+        occSubscription = liveQuery(() => db.visitOccurrences.toArray()).subscribe({
+          next: (rows) => { occurrences.value = rows || [] },
+          error: (e) => { console.warn('occurrences liveQuery error', e) }
+        })
+      } catch (e) {
+        console.warn('Failed to subscribe to occurrences; falling back to manual load', e)
+        occurrences.value = await db.visitOccurrences.toArray().catch(() => [])
+      }
+
       // Pull-to-refresh for agenda content
       await nextTick()
       const getScrollableEl = () => document.querySelector('.agenda-content')
       usePullToRefresh(getScrollableEl)
+
+      // Load notes pad
+      await loadNotes()
     })
+
+    onUnmounted(() => { try { occSubscription?.unsubscribe() } catch {} })
 
     return {
       loading,
@@ -258,8 +355,11 @@ export default {
       closeDrawer,
       handleSaveContact,
       handleDeleteContact,
+      handleAddOccurrence,
       onOuterTouchStart,
-      onOuterTouchEnd
+      onOuterTouchEnd,
+      // Notes bindings
+      editorRef, toolbarRef, exec, applyHeading, toggleList, toggleChecklist, undo, redo, onEdit
     }
   }
 }
@@ -296,6 +396,13 @@ export default {
   flex: 1;
   overflow-y: auto;
 }
+
+.agenda-notes { display: flex; flex-direction: column; align-items: center; margin-bottom: 1rem; }
+.notes-header h3 { margin: 0 0 0.5rem 0; color: var(--text-color); text-align: center; }
+.notes-editor { width: min(680px, 100%); background: white; border: 1px solid var(--border-color); border-radius: 10px; padding: 0.5rem; }
+.toolbar { display: flex; gap: 0.35rem; overflow-x: auto; padding-bottom: 0.25rem; }
+.toolbar button { border: 1px solid var(--border-color); background: var(--cell-background-color, #f9fafb); padding: 0.3rem 0.5rem; border-radius: 6px; }
+.editor { min-height: 120px; padding: 0.5rem; outline: none; }
 
 .loading-state,
 .error-state {

@@ -16,6 +16,7 @@ const generateUuid = () => {
 
 // Remote table name
 const TABLE = 'contacts'
+const OCC_TABLE = 'visit_occurrences'
 
 // Map local contact to remote row
 const toRemote = (c) => ({
@@ -135,7 +136,8 @@ export const syncService = {
     const userId = await this.getUserId()
     if (!userId) return { pushed: 0 }
     const locals = await db.contacts.toArray()
-    if (locals.length === 0) return { pushed: 0 }
+    const occs = await db.visitOccurrences.toArray().catch(() => [])
+    if (locals.length === 0 && occs.length === 0) return { pushed: 0 }
 
     // Ensure each local has a remote UUID so upsert is deterministic
     const withUuid = await Promise.all(
@@ -162,13 +164,47 @@ export const syncService = {
         )
       )
     }
+    // Push occurrences
+    if (Array.isArray(occs) && occs.length > 0) {
+      // Ensure occurrence.remote_uuid exists
+      const withOccUuid = await Promise.all(
+        occs.map(async (o) => {
+          if (!o.remote_uuid) {
+            const newUuid = generateUuid()
+            const nowIso = new Date().toISOString()
+            await db.visitOccurrences.update(o.id, { remote_uuid: newUuid, updated_at: nowIso })
+            return { ...o, remote_uuid: newUuid, updated_at: nowIso }
+          }
+          return o
+        })
+      )
+      const occPayload = withOccUuid.map((o) => ({
+        remote_uuid: o.remote_uuid,
+        contact_remote_uuid: o.contact_remote_uuid || null,
+        scheduled_at: o.scheduled_at,
+        reminders: o.reminders || ['-30'],
+        status: o.status || 'planned',
+        updated_at: o.updated_at || new Date().toISOString(),
+        user_id: userId,
+      }))
+      const { data: occData, error: occErr } = await supabase.from(OCC_TABLE).upsert(occPayload, { onConflict: 'remote_uuid' }).select()
+      if (occErr) throw occErr
+      if (Array.isArray(occData)) {
+        await Promise.all(
+          occData.map((r) =>
+            db.visitOccurrences.where('remote_uuid').equals(r.remote_uuid).modify({ updated_at: r.updated_at })
+          )
+        )
+      }
+    }
+
     // Nudge other clients to pull
     try {
       if (this._notifyChannel) {
         await this._notifyChannel.send({ type: 'broadcast', event: 'contacts_changed', payload: { at: Date.now() } })
       }
     } catch {}
-    return { pushed: data?.length || 0 }
+    return { pushed: (data?.length || 0) }
   },
 
   async pullAll() {
@@ -214,6 +250,55 @@ export const syncService = {
         pulled++
       }
     }
+    // Pull occurrences
+    try {
+      const { data: occData, error: occErr } = await supabase.from(OCC_TABLE).select('*').eq('user_id', userId)
+      if (occErr) throw occErr
+      if (Array.isArray(occData)) {
+        for (const remote of occData) {
+          // Find local by remote_uuid
+          const local = remote.remote_uuid && await db.visitOccurrences.where('remote_uuid').equals(remote.remote_uuid).first()
+          if (!local) {
+            // Map contact_remote_uuid to local contact_id if possible
+            let contactId = null
+            if (remote.contact_remote_uuid) {
+              const localContact = await db.contacts.where('remote_uuid').equals(remote.contact_remote_uuid).first()
+              contactId = localContact?.id || null
+            }
+            await db.visitOccurrences.add({
+              remote_uuid: remote.remote_uuid,
+              contact_id: contactId,
+              contact_remote_uuid: remote.contact_remote_uuid || null,
+              scheduled_at: remote.scheduled_at,
+              reminders: remote.reminders || ['-30'],
+              status: remote.status || 'planned',
+              created_at: remote.created_at || new Date().toISOString(),
+              updated_at: remote.updated_at || new Date().toISOString(),
+            })
+            pulled++
+          } else if (isRemoteNewer(remote, local)) {
+            let contactId = local.contact_id || null
+            if (remote.contact_remote_uuid) {
+              const localContact = await db.contacts.where('remote_uuid').equals(remote.contact_remote_uuid).first()
+              contactId = localContact?.id || contactId
+            }
+            await db.visitOccurrences.update(local.id, {
+              contact_id: contactId,
+              contact_remote_uuid: remote.contact_remote_uuid || null,
+              scheduled_at: remote.scheduled_at,
+              reminders: remote.reminders || ['-30'],
+              status: remote.status || 'planned',
+              remote_uuid: remote.remote_uuid,
+              updated_at: remote.updated_at,
+            })
+            pulled++
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Pull occurrences failed', e)
+    }
+
     // After pulling, run a local de-duplication pass
     await this._dedupeLocals()
     return { pulled }

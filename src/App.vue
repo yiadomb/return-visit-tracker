@@ -43,7 +43,7 @@
       </div>
     </header>
     
-    <main class="app-main">
+    <main class="app-main no-select">
       <div @touchstart.passive="onEdgeTouchStart" @touchend.passive="onEdgeTouchEnd" style="height:100%">
         <router-view />
       </div>

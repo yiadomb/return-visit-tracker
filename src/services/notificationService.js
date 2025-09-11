@@ -1,4 +1,4 @@
-import { contactService } from './db'
+import { contactService, occurrenceService } from './db'
 
 class NotificationService {
   constructor() {
@@ -112,7 +112,7 @@ class NotificationService {
     }
   }
 
-  // Schedule reminders for all upcoming visits
+  // Schedule reminders for all upcoming visit occurrences
   async scheduleVisitReminders() {
     if (!this.notifications?.hasPermission.value) {
       console.log('No notification permission, skipping visit reminders')
@@ -121,21 +121,16 @@ class NotificationService {
 
     try {
       const contacts = await contactService.getAll()
-      const now = new Date()
-      const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000)
+      const upcoming = await occurrenceService.listUpcoming(7)
+      const byContact = new Map(contacts.map(c => [c.id, c]))
 
       // Clear existing visit reminders
       await this.clearVisitReminders()
 
-      for (const contact of contacts) {
-        if (!contact.next_visit_at) continue
-
-        const visitDate = new Date(contact.next_visit_at)
-        
-        // Only schedule notifications for future visits within the next 7 days
-        if (visitDate > now && visitDate <= new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)) {
-          await this.scheduleVisitReminder(contact)
-        }
+      for (const occ of upcoming) {
+        const contact = byContact.get(occ.contact_id)
+        if (!contact) continue
+        await this.scheduleVisitReminderForOccurrence(contact, occ)
       }
 
       console.log(`Scheduled reminders for ${this.scheduledVisitIds.size} upcoming visits`)
@@ -144,12 +139,15 @@ class NotificationService {
     }
   }
 
-  // Schedule reminder for a specific visit
-  async scheduleVisitReminder(contact) {
+  // Schedule reminder for a specific visit occurrence
+  async scheduleVisitReminderForOccurrence(contact, occurrence) {
     try {
-      if (!contact.next_visit_at) return
-      const visitDate = new Date(contact.next_visit_at)
-      const reminders = Array.isArray(contact.reminders) && contact.reminders.length > 0 ? contact.reminders : ['-30']
+      if (!occurrence?.scheduled_at) return
+      const visitDate = new Date(occurrence.scheduled_at)
+      // Use occurrence-level reminders if present; else fall back to contact-level
+      const reminders = Array.isArray(occurrence.reminders) && occurrence.reminders.length > 0
+        ? occurrence.reminders
+        : (Array.isArray(contact.reminders) && contact.reminders.length > 0 ? contact.reminders : ['-30'])
       const now = new Date()
 
       for (const token of reminders) {
@@ -175,7 +173,7 @@ class NotificationService {
           }
         }
 
-        const notificationId = `visit_${contact.id}_${token}`
+        const notificationId = `visit_${contact.id}_${new Date(occurrence.scheduled_at).getTime()}_${token}`
 
         await this.notifications.scheduleNotification({
           id: notificationId,
@@ -185,6 +183,7 @@ class NotificationService {
           extra: {
             type: 'visit_reminder',
             contactId: contact.id,
+            occurrenceAt: occurrence.scheduled_at,
             offset: token
           }
         })
@@ -199,8 +198,13 @@ class NotificationService {
   // Cancel reminder for a specific visit
   async cancelVisitReminder(contactId) {
     try {
-      const notificationId = `visit_${contactId}`
-      await this.notifications.cancelNotification(notificationId)
+      // Cancel all pending notifications for this contact
+      const pendingNotifications = await this.notifications.getPendingNotifications()
+      for (const notification of pendingNotifications) {
+        if (notification.extra?.type === 'visit_reminder' && notification.extra?.contactId === contactId) {
+          await this.notifications.cancelNotification(notification.id)
+        }
+      }
       this.scheduledVisitIds.delete(contactId)
       console.log(`Cancelled reminder for contact ${contactId}`)
     } catch (error) {
@@ -264,19 +268,11 @@ class NotificationService {
     if (!this.isInitialized) return
 
     try {
-      // Cancel old reminder if visit date changed
-      if (oldContact && oldContact.next_visit_at !== contact.next_visit_at) {
-        await this.cancelVisitReminder(contact.id)
-      }
-
-      // Schedule new reminder if there's a future visit date
-      if (contact.next_visit_at) {
-        const visitDate = new Date(contact.next_visit_at)
-        const now = new Date()
-        
-        if (visitDate > now && visitDate <= new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)) {
-          await this.scheduleVisitReminder(contact)
-        }
+      // Rebuild all reminders for this contact since occurrences may have changed indirectly
+      await this.cancelVisitReminder(contact.id)
+      const upcoming = (await occurrenceService.listUpcoming(7)).filter(o => o.contact_id === contact.id)
+      for (const occ of upcoming) {
+        await this.scheduleVisitReminderForOccurrence(contact, occ)
       }
 
       // Update daily reminders if contact bucket changed

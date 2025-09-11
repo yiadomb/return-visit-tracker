@@ -67,35 +67,66 @@
         <!-- Divider -->
         <div class="form-divider"></div>
 
-        <!-- Phone -->
+        <!-- Phone + Ministry Context inline -->
         <div class="form-group">
-          <label for="phone">Phone</label>
-          <input
-            id="phone"
-            v-model="formData.phone"
-            type="tel"
-            placeholder="0555000000"
-            pattern="[0-9]{10}"
-            autocomplete="off"
-            :class="{ 'error': errors.phone }"
-            :readonly="mode === 'view'"
-            :disabled="mode === 'view'"
-          />
+          <label>Phone & Ministry Context</label>
+          <div class="phone-ministry-row">
+            <div class="phone-wrapper">
+              <input
+                id="phone"
+                v-model="formData.phone"
+                type="tel"
+                placeholder="0555000000"
+                pattern="[0-9]{10}"
+                autocomplete="off"
+                :class="{ 'error': errors.phone }"
+                :readonly="mode === 'view'"
+                :disabled="mode === 'view'"
+              />
+            </div>
+            <div class="mini-select" ref="tagSelectRef">
+              <button type="button" class="mini-trigger" @click="showTagMenu = !showTagMenu">
+                {{ formData.tags || 'Select context...' }}
+                <span class="caret">▾</span>
+              </button>
+              <div v-if="showTagMenu && mode !== 'view'" class="mini-menu" @click.stop>
+                <button class="mini-option" @click="chooseTag('')">Select context...</button>
+                <button v-for="tag in MINISTRY_TAGS" :key="tag" class="mini-option" @click="chooseTag(tag)">
+                  {{ tag }}
+                </button>
+              </div>
+            </div>
+          </div>
           <span v-if="errors.phone" class="error-text">{{ errors.phone }}</span>
         </div>
 
-        <!-- Bucket (custom small dropdown) -->
+        <!-- Bucket (custom small dropdown) + Day Time inline -->
         <div class="form-group">
-          <label>Day *</label>
-          <div class="mini-select" ref="bucketSelectRef">
-            <button type="button" class="mini-trigger" @click="showBucketMenu = !showBucketMenu">
-              {{ formData.bucket || 'Select day' }}
-              <span class="caret">▾</span>
-            </button>
-            <div v-if="showBucketMenu && mode !== 'view'" class="mini-menu" @click.stop>
-              <button v-for="bucket in BUCKETS" :key="bucket" class="mini-option" @click="chooseBucket(bucket)">
-              {{ bucket }}
+          <label>Day Available</label>
+          <div class="day-row">
+            <div class="mini-select" ref="bucketSelectRef">
+              <button type="button" class="mini-trigger" @click="showBucketMenu = !showBucketMenu">
+                {{ formData.bucket || 'Select day' }}
+                <span class="caret">▾</span>
               </button>
+              <div v-if="showBucketMenu && mode !== 'view'" class="mini-menu" @click.stop>
+                <button v-for="bucket in BUCKETS" :key="bucket" class="mini-option" @click="chooseBucket(bucket)">
+                {{ bucket }}
+                </button>
+              </div>
+            </div>
+            <div class="time-wrapper day-time-wrapper">
+              <input
+                id="bucket_time"
+                v-model="formData.bucket_time"
+                type="time"
+                class="time-input day-time-input"
+                :readonly="mode === 'view'"
+                :disabled="mode === 'view'"
+                title="Choose time for this day"
+                @change="onBucketTimeChange"
+              />
+              <span v-if="!formData.bucket_time" class="time-placeholder">🕐 Time</span>
             </div>
           </div>
         </div>
@@ -114,6 +145,7 @@
                 :readonly="mode === 'view'"
                 :disabled="mode === 'view'"
                 title="Choose return visit date"
+                ref="dateInputRef"
               />
               <span v-if="!formData.next_visit_date" class="date-placeholder">📅 Date</span>
             </div>
@@ -123,41 +155,70 @@
                 v-model="formData.next_visit_time"
                 type="time"
                 class="time-input"
+                :class="{ glow: highlightTime }"
                 :readonly="mode === 'view'"
                 :disabled="mode === 'view'"
                 title="Choose return visit time"
                 @focus="onTimeFocus"
                 @blur="onTimeBlur"
+                ref="timeInputRef"
               />
               <span v-if="!formData.next_visit_time" class="time-placeholder">🕐 Time</span>
             </div>
-          </div>
-          <small class="field-hint">When do you plan to visit again?</small>
-          <label class="remind-toggle">
-            <input type="checkbox" v-model="remindMe" />
-            Remind me
-          </label>
-        </div>
-
-        <!-- Ministry Tag (custom small dropdown) -->
-        <div class="form-group">
-          <label>Ministry Context</label>
-          <div class="mini-select" ref="tagSelectRef">
-            <button type="button" class="mini-trigger" @click="showTagMenu = !showTagMenu">
-              {{ formData.tags || 'Select context...' }}
-              <span class="caret">▾</span>
+            <button type="button" class="set-visit-btn" :class="{ glow: highlightSet }" :disabled="!formData.next_visit_date" @click="setCurrentVisit">
+              ✓ Set
             </button>
-            <div v-if="showTagMenu && mode !== 'view'" class="mini-menu" @click.stop>
-              <button class="mini-option" @click="chooseTag('')">Select context...</button>
-              <button v-for="tag in MINISTRY_TAGS" :key="tag" class="mini-option" @click="chooseTag(tag)">
-                {{ tag }}
-              </button>
+          </div>
+          <div class="reminder-select">
+            <span class="chip-label">Remind me</span>
+            <button type="button" class="reminder-dropdown" @click="showReminderMenu = !showReminderMenu">
+              {{ reminderLabel }} <span class="caret">▾</span>
+            </button>
+            <div v-if="showReminderMenu" class="reminder-menu" @click.stop>
+              <button class="reminder-option" :class="{ active: selectedReminder === '0' }" @click="selectedReminder = '0'; showReminderMenu=false">On time</button>
+              <button class="reminder-option" :class="{ active: selectedReminder === '-180' }" @click="selectedReminder = '-180'; showReminderMenu=false">3 hrs early</button>
+              <div class="reminder-custom">
+                <label class="custom-title">Custom</label>
+                <div class="custom-inputs">
+                  <input type="number" min="0" max="72" v-model.number="customHours" class="num-input" placeholder="0" aria-label="Hours" />
+                  <span class="colon">h</span>
+                  <input type="number" min="0" max="59" v-model.number="customMinutes" class="num-input" placeholder="0" aria-label="Minutes" />
+                  <span class="colon">m</span>
+                  <button type="button" class="apply-btn" @click="selectedReminder='custom'; showReminderMenu=false">Apply</button>
+                </div>
+              </div>
             </div>
           </div>
+          <div class="add-occurrence-row">
+            <button 
+              type="button" 
+              class="btn-secondary" 
+              @click="addAnotherDate" 
+              :disabled="mode === 'add'"
+              :title="mode === 'add' ? 'Save contact first to enable' : ''"
+            >
+              ＋ Add other days
+            </button>
+            <span class="occ-hint" v-if="mode === 'add'">Save contact first, then add extra dates</span>
+          </div>
         </div>
 
-        <!-- Quick Actions (for editing only) -->
-        <div v-if="mode !== 'add'" class="quick-actions">
+        
+
+        <!-- Scheduled dates list (visible when editing/viewing) -->
+        <div v-if="mode !== 'add'" class="form-group">
+          <label>Scheduled Visits</label>
+          <div v-if="occurrences.length === 0" class="occ-empty">No extra dates yet</div>
+          <ul v-else class="occ-list">
+            <li v-for="occ in occurrences" :key="occ.id" class="occ-item">
+              <span class="occ-date">{{ formatOccurrence(occ.scheduled_at) }}</span>
+              <button type="button" class="occ-remove" @click="removeOccurrence(occ)">Remove</button>
+            </li>
+          </ul>
+        </div>
+
+        <!-- Quick Actions (for editing only, hidden for mirrored contacts) -->
+        <div v-if="mode !== 'add' && !isMirrored" class="quick-actions">
           <h4>Quick Actions</h4>
           <div class="action-buttons">
             <a 
@@ -219,8 +280,9 @@
 </template>
 
 <script>
-import { ref, reactive, computed, watch } from 'vue'
-import { BUCKETS, MINISTRY_TAGS } from '../../services/db.js'
+import { ref, reactive, computed, watch, onUnmounted, nextTick } from 'vue'
+import { BUCKETS, MINISTRY_TAGS, db, occurrenceService } from '../../services/db.js'
+import { liveQuery } from 'dexie'
 
 export default {
   name: 'ContactDrawer',
@@ -238,7 +300,7 @@ export default {
       default: false
     }
   },
-  emits: ['close', 'save', 'delete', 'archive'],
+  emits: ['close', 'save', 'delete', 'archive', 'add-occurrence', 'update-field'],
   setup(props, { emit }) {
     const mode = computed(() => {
       if (props.isEditing) return 'edit'
@@ -249,11 +311,16 @@ export default {
       if (mode.value === 'edit') return 'Edit Contact'
       return 'Add Contact'
     })
+    const isMirrored = computed(() => {
+      const c = props.contact || {}
+      return c.__mirrored === true
+    })
 
     const formData = reactive({
       name: '',
       phone: '',
       bucket: 'Saturday',
+      bucket_time: '',
       hostel_name: '',
       location_detail: '',
       next_visit_date: '',
@@ -262,13 +329,45 @@ export default {
       notes: '',
       reminders: ['-30']
     })
-    const remindMe = ref(true)
+    // Reminder selection (single choice with custom H/M)
+    const selectedReminder = ref('-180') // '0' on time, '-180' 3 hours early, 'custom'
+    const customHours = ref(1)
+    const customMinutes = ref(0)
     const showBucketMenu = ref(false)
     const showTagMenu = ref(false)
+    const showReminderMenu = ref(false)
     const bucketSelectRef = ref(null)
     const tagSelectRef = ref(null)
+    const dateInputRef = ref(null)
+    const timeInputRef = ref(null)
+    const highlightTime = ref(false)
+    const highlightSet = ref(false)
 
     // Removed tablet custom menu; restore native time input everywhere
+    const onBucketTimeChange = () => {
+      try {
+        if (props?.contact?.id && props.isEditing) {
+          emit('update-field', { bucket_time: formData.bucket_time })
+        }
+      } catch {}
+    }
+    // Occurrences state (for this contact)
+    const occurrences = ref([])
+    let occSub = null
+    const subscribeOccurrences = (contactId) => {
+      try { occSub?.unsubscribe() } catch {}
+      if (!contactId) return
+      try {
+        occSub = liveQuery(() => db.visitOccurrences.where('contact_id').equals(contactId).toArray()).subscribe({
+          next: (rows) => {
+            occurrences.value = (rows || []).slice().sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at))
+          },
+          error: (e) => { console.warn('occurrences liveQuery (drawer) error', e) }
+        })
+      } catch (e) {
+        console.warn('Failed to subscribe to occurrences in drawer', e)
+      }
+    }
 
     const chooseBucket = (bucket) => {
       formData.bucket = bucket
@@ -308,15 +407,22 @@ export default {
         if (!props.isEditing && newContact.bucket) {
           formData.bucket = newContact.bucket
         }
-        if (newContact.reminders) {
-          formData.reminders = [...newContact.reminders]
-          remindMe.value = formData.reminders.length > 0
-        } else if (newContact.reminder_offset !== undefined) {
-          formData.reminders = [String(newContact.reminder_offset)]
-          remindMe.value = true
+        if (newContact.reminders && Array.isArray(newContact.reminders) && newContact.reminders.length > 0) {
+          const tok = String(newContact.reminders[0])
+          if (tok === '0' || tok === '-180') {
+            selectedReminder.value = tok
+          } else if (/^-?\d+$/.test(tok)) {
+            selectedReminder.value = 'custom'
+            const mins = Math.abs(parseInt(tok, 10))
+            customHours.value = Math.floor(mins / 60)
+            customMinutes.value = mins % 60
+          } else {
+            selectedReminder.value = '-180'
+          }
         } else {
-          remindMe.value = true
+          selectedReminder.value = '-180'
         }
+        if (newContact.id) subscribeOccurrences(newContact.id)
       } else {
         // Reset form for new contact
         Object.keys(formData).forEach(key => {
@@ -328,10 +434,12 @@ export default {
             formData[key] = ''
           }
         })
-        remindMe.value = true
+        selectedReminder.value = '-180'
       }
       errors.value = {}
     }, { immediate: true })
+
+    onUnmounted(() => { try { occSub?.unsubscribe() } catch {} })
 
     // Validation
     const validateForm = () => {
@@ -362,27 +470,100 @@ export default {
         contactData.phone = contactData.phone.replace(/\D/g, '')
       }
 
-      // Combine date and time into next_visit_at
-      if (contactData.next_visit_date) {
-        if (contactData.next_visit_time) {
+      // Only on Add: combine date and time into next_visit_at
+      if (mode.value === 'add') {
+        if (contactData.next_visit_date && contactData.next_visit_time) {
           contactData.next_visit_at = `${contactData.next_visit_date}T${contactData.next_visit_time}`
           contactData.time_explicitly_set = true
         } else {
-          contactData.next_visit_at = `${contactData.next_visit_date}T10:00`
+          contactData.next_visit_at = ''
           contactData.time_explicitly_set = false
         }
       } else {
-        contactData.next_visit_at = ''
-        contactData.time_explicitly_set = false
+        // On Edit: occurrences are managed via Set/Add buttons; do not upsert here
+        delete contactData.next_visit_at
       }
 
       delete contactData.next_visit_date
       delete contactData.next_visit_time
 
-      // Map toggle to default reminder: 1 hour before the selected time
-      contactData.reminders = remindMe.value ? ['-60'] : []
+      // Use selected per-visit reminder as contact default
+      contactData.reminders = computeReminders()
 
       emit('save', contactData)
+    }
+
+    const addAnotherDate = async () => {
+      if (mode.value === 'add') return
+      const contactData = { ...formData }
+      // If no date yet, focus date picker
+      if (!contactData.next_visit_date) {
+        try { dateInputRef.value?.showPicker?.() } catch {}
+        highlightTime.value = false
+        highlightSet.value = false
+        return
+      }
+      if (contactData.phone) {
+        contactData.phone = contactData.phone.replace(/\D/g, '')
+      }
+      // If time missing, prompt and visually guide
+      if (!contactData.next_visit_time) {
+        highlightTime.value = true
+        try { timeInputRef.value?.showPicker?.() } catch {}
+        return
+      }
+      const t = contactData.next_visit_time
+      contactData.next_visit_at = `${contactData.next_visit_date}T${t}`
+      const reminders = computeReminders()
+      // Immediate local add
+      try {
+        if (props.contact?.id) {
+          await occurrenceService.addOrIgnore({ contact_id: props.contact.id, scheduled_at: contactData.next_visit_at, reminders })
+        }
+      } catch {}
+      emit('add-occurrence', { next_visit_at: contactData.next_visit_at, reminders })
+      // Clear date to encourage adding another; keep time to reuse if desired
+      formData.next_visit_date = ''
+      // Open the date picker automatically for fast multi-select, then time picker
+      requestAnimationFrame(() => { try { dateInputRef.value?.showPicker?.() } catch {} })
+      openTimeAfterDate.value = true
+      // Nudge next steps
+      highlightTime.value = true
+      highlightSet.value = true
+    }
+
+    const setCurrentVisit = async () => {
+      // Save the currently selected date/time as an occurrence and show it immediately
+      const contactData = { ...formData }
+      if (!contactData.next_visit_date || mode.value === 'add') return
+      const t = contactData.next_visit_time || '10:00'
+      const when = `${contactData.next_visit_date}T${t}`
+      const reminders = computeReminders()
+      // Immediate local add
+      try { if (props.contact?.id) await occurrenceService.addOrIgnore({ contact_id: props.contact.id, scheduled_at: when, reminders }) } catch {}
+      emit('add-occurrence', { next_visit_at: when, reminders })
+      // Clear the form to provide feedback that it worked
+      formData.next_visit_date = ''
+      formData.next_visit_time = ''
+      highlightTime.value = false
+      highlightSet.value = false
+    }
+
+    const removeOccurrence = async (occ) => {
+      try {
+        if (occ?.id) {
+          await occurrenceService.delete(occ.id)
+        } else if (props.contact?.id && occ?.scheduled_at) {
+          await occurrenceService.deleteByContactAndTime(props.contact.id, occ.scheduled_at)
+        }
+      } catch (e) {
+        alert('Failed to remove date. Please try again.')
+      }
+    }
+
+    const formatOccurrence = (iso) => {
+      const d = new Date(iso)
+      return d.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
     }
 
     // Handle overlay click (close drawer)
@@ -398,15 +579,47 @@ export default {
     }
     const onTimeBlur = () => {}
 
+    // After choosing a date, optionally open time picker automatically
+    const openTimeAfterDate = ref(false)
+    watch(() => formData.next_visit_date, async (v, old) => {
+      if (!v) return
+      if (openTimeAfterDate.value) {
+        await nextTick()
+        try { timeInputRef.value?.showPicker?.() } catch {}
+        openTimeAfterDate.value = false
+        highlightTime.value = true
+        highlightSet.value = true
+      }
+    })
+
+    const computeReminders = () => {
+      if (selectedReminder.value === 'custom') {
+        const mins = Math.max(0, (parseInt(customHours.value || 0, 10) * 60) + parseInt(customMinutes.value || 0, 10))
+        return [String(-mins)]
+      }
+      return [selectedReminder.value]
+    }
+    const reminderLabel = computed(() => {
+      if (selectedReminder.value === '0') return 'On time'
+      if (selectedReminder.value === '-180') return '3 hrs early'
+      const mins = Math.max(0, (parseInt(customHours.value || 0, 10) * 60) + parseInt(customMinutes.value || 0, 10))
+      const h = Math.floor(mins / 60)
+      const m = mins % 60
+      const parts = []
+      if (h > 0) parts.push(`${h}h`)
+      if (m > 0 || h === 0) parts.push(`${m}m`)
+      return `${parts.join(' ')} early`
+    })
+
           return {
         mode,
         title,
+        isMirrored,
         formData,
         errors,
         today,
         BUCKETS,
         MINISTRY_TAGS,
-        remindMe,
         showBucketMenu,
         showTagMenu,
         chooseBucket,
@@ -415,8 +628,23 @@ export default {
         tagSelectRef,
         onTimeFocus,
         onTimeBlur,
+        onBucketTimeChange,
         validateForm,
         handleSubmit,
+        addAnotherDate,
+      setCurrentVisit,
+      dateInputRef,
+      timeInputRef,
+      highlightTime,
+      highlightSet,
+      selectedReminder,
+      customHours,
+      customMinutes,
+      reminderLabel,
+      showReminderMenu,
+      occurrences,
+        removeOccurrence,
+        formatOccurrence,
         handleOverlayClick,
         onTimeFocus,
         onTimeBlur
@@ -578,6 +806,7 @@ export default {
 
 .date-input, .time-input {
   width: 100%;
+  height: 36px;
 }
 
 .date-placeholder, .time-placeholder {
@@ -599,6 +828,12 @@ export default {
 .date-input:focus + .date-placeholder,
 .time-input:focus + .time-placeholder {
   opacity: 0.5;
+}
+
+.time-input.glow,
+.set-visit-btn.glow {
+  box-shadow: 0 0 0 3px rgba(52,152,219,0.25);
+  border-color: var(--primary-color);
 }
 
 .sheet-footer {
@@ -711,10 +946,55 @@ export default {
 .remind-toggle { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
 .remind-toggle input[type="checkbox"] { width: 1rem; height: 1rem; accent-color: var(--primary-color); }
 
+.add-occurrence-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+.occ-hint { color: #666; font-size: 0.8rem; }
+.occ-list { list-style: none; padding: 0; margin: 0.25rem 0 0 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.occ-item { display: flex; align-items: center; justify-content: space-between; background: var(--cell-background-color); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.35rem 0.5rem; }
+.occ-date { color: var(--text-color); font-size: 0.9rem; }
+.occ-remove { border: 1px solid #e74c3c; background: #e74c3c; color: #fff; border-radius: 4px; padding: 0.25rem 0.5rem; font-size: 0.8rem; cursor: pointer; }
+.occ-remove:hover { opacity: 0.9; }
+.occ-empty { color: #888; font-size: 0.85rem; }
+.set-visit-btn { margin-left: 0.25rem; height: 36px; padding: 0 0.6rem; border: 1px solid var(--primary-color); background: var(--primary-color); color: #fff; border-radius: 4px; font-size: 0.85rem; }
+.set-visit-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.reminder-select { position: relative; display: flex; align-items: center; gap: 0.35rem; margin-top: 0.5rem; flex-wrap: wrap; }
+.chip-label { font-size: 0.85rem; color: #666; }
+.reminder-dropdown { border: 1px solid var(--border-color); background: var(--cell-background-color); color: var(--text-color); border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.9rem; cursor: pointer; }
+.reminder-menu { position: absolute; top: calc(100% + 6px); left: 0; background: var(--background-color); color: var(--text-color); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 10px 20px rgba(0,0,0,0.15); padding: 0.5rem; z-index: 2000; min-width: 240px; }
+.reminder-option { display: block; width: 100%; text-align: left; padding: 0.4rem 0.5rem; border: 1px solid transparent; background: transparent; border-radius: 6px; cursor: pointer; margin-bottom: 0.25rem; color: var(--text-color); }
+.reminder-option:hover { background: var(--cell-background-color); }
+.reminder-option.active { background: var(--cell-background-color); border-color: var(--border-color); }
+.reminder-custom { padding: 0.25rem 0.25rem 0.1rem 0.25rem; border-top: 1px dashed var(--border-color); margin-top: 0.35rem; }
+.custom-title { font-size: 0.85rem; color: #666; }
+.custom-inputs { display: flex; align-items: center; gap: 0.25rem; margin-top: 0.25rem; }
+.num-input { width: 3.5rem; padding: 0.25rem 0.35rem; border: 1px solid var(--border-color); border-radius: 4px; background: var(--cell-background-color); color: var(--text-color); }
+.apply-btn { border: 1px solid var(--primary-color); background: var(--primary-color); color: #fff; border-radius: 6px; padding: 0.25rem 0.6rem; font-size: 0.85rem; }
+
 /* Ultra-compact custom select for mobile */
-.mini-select { position: relative; width: 100%; }
+.phone-ministry-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.phone-wrapper {
+  flex: 1;
+}
+
+.phone-wrapper input {
+  width: 100%;
+  height: 36px;
+}
+
+.day-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mini-select { position: relative; flex: 1.5; }
 .mini-trigger {
   width: 100%;
+  height: 36px;
   padding: 0.4rem 0.55rem;
   border: 1px solid var(--border-color);
   border-radius: 4px;
@@ -724,6 +1004,16 @@ export default {
   font-size: 0.85rem;
 }
 .mini-trigger .caret { float: right; }
+
+.day-time-wrapper {
+  flex: 1;
+  min-width: 0;
+}
+
+.day-time-input {
+  width: 100%;
+  height: 36px;
+}
 .mini-menu {
   position: absolute;
   top: calc(100% + 6px);
