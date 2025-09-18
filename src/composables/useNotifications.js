@@ -11,6 +11,22 @@ export function useNotifications() {
   // Track scheduled web notifications for cancellation
   const webNotificationTimeouts = new Map()
 
+  // Ensure native LocalNotifications receive numeric IDs
+  const toNativeId = (id) => {
+    if (typeof id === 'number' && Number.isFinite(id)) return id
+    if (typeof id === 'string') {
+      let hash = 0
+      for (let i = 0; i < id.length; i++) {
+        const chr = id.charCodeAt(i)
+        hash = ((hash << 5) - hash) + chr
+        hash |= 0
+      }
+      const n = Math.abs(hash)
+      return n > 0 ? n : Date.now()
+    }
+    return Date.now()
+  }
+
   // Check if notifications are supported
   const checkSupport = async () => {
     if (Capacitor.isNativePlatform()) {
@@ -74,11 +90,12 @@ export function useNotifications() {
 
     try {
       if (Capacitor.isNativePlatform()) {
-        // Use Capacitor for native platforms
+        // Use Capacitor for native platforms (ID must be a number)
+        const nativeId = toNativeId(notification.id)
         await LocalNotifications.schedule({
           notifications: [
             {
-              id: notification.id || Date.now(),
+              id: nativeId,
               title: notification.title,
               body: notification.body,
               schedule: notification.schedule,
@@ -279,7 +296,7 @@ export function useNotifications() {
     try {
       if (Capacitor.isNativePlatform()) {
         await LocalNotifications.cancel({
-          notifications: [{ id }]
+          notifications: [{ id: toNativeId(id) }]
         })
       } else {
         // Cancel web notification timeout

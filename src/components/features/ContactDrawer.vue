@@ -194,27 +194,38 @@
               type="button" 
               class="btn-secondary" 
               @click="addAnotherDate" 
-              :disabled="mode === 'add'"
-              :title="mode === 'add' ? 'Save contact first to enable' : ''"
+              :disabled="mode === 'view'"
             >
               ＋ Add other days
             </button>
-            <span class="occ-hint" v-if="mode === 'add'">Save contact first, then add extra dates</span>
           </div>
         </div>
 
         
 
-        <!-- Scheduled dates list (visible when editing/viewing) -->
-        <div v-if="mode !== 'add'" class="form-group">
+        <!-- Scheduled dates list -->
+        <div class="form-group">
           <label>Scheduled Visits</label>
-          <div v-if="occurrences.length === 0" class="occ-empty">No extra dates yet</div>
-          <ul v-else class="occ-list">
-            <li v-for="occ in occurrences" :key="occ.id" class="occ-item">
-              <span class="occ-date">{{ formatOccurrence(occ.scheduled_at) }}</span>
-              <button type="button" class="occ-remove" @click="removeOccurrence(occ)">Remove</button>
-            </li>
-          </ul>
+          <!-- Add mode: show staged occurrences -->
+          <div v-if="mode === 'add'">
+            <div v-if="stagedOccurrences.length === 0" class="occ-empty">No extra dates yet</div>
+            <ul v-else class="occ-list">
+              <li v-for="(occ, idx) in stagedOccurrences" :key="occ.scheduled_at + '-' + idx" class="occ-item">
+                <span class="occ-date">{{ formatOccurrence(occ.scheduled_at) }}</span>
+                <button type="button" class="occ-remove" @click="removeStaged(idx)">Remove</button>
+              </li>
+            </ul>
+          </div>
+          <!-- Edit/View mode: show persisted occurrences -->
+          <div v-else>
+            <div v-if="occurrences.length === 0" class="occ-empty">No extra dates yet</div>
+            <ul v-else class="occ-list">
+              <li v-for="occ in occurrences" :key="occ.id" class="occ-item">
+                <span class="occ-date">{{ formatOccurrence(occ.scheduled_at) }}</span>
+                <button type="button" class="occ-remove" @click="removeOccurrence(occ)">Remove</button>
+              </li>
+            </ul>
+          </div>
         </div>
 
         <!-- Quick Actions (for editing only, hidden for mirrored contacts) -->
@@ -353,6 +364,8 @@ export default {
     }
     // Occurrences state (for this contact)
     const occurrences = ref([])
+    // Staged occurrences before first save (Add mode)
+    const stagedOccurrences = ref([])
     let occSub = null
     const subscribeOccurrences = (contactId) => {
       try { occSub?.unsubscribe() } catch {}
@@ -489,12 +502,15 @@ export default {
 
       // Use selected per-visit reminder as contact default
       contactData.reminders = computeReminders()
+      // Include staged extra dates in Add mode so caller can create occurrences after contact is created
+      if (mode.value === 'add' && stagedOccurrences.value.length > 0) {
+        contactData.stagedOccurrences = stagedOccurrences.value.slice()
+      }
 
       emit('save', contactData)
     }
 
     const addAnotherDate = async () => {
-      if (mode.value === 'add') return
       const contactData = { ...formData }
       // If no date yet, focus date picker
       if (!contactData.next_visit_date) {
@@ -515,13 +531,31 @@ export default {
       const t = contactData.next_visit_time
       contactData.next_visit_at = `${contactData.next_visit_date}T${t}`
       const reminders = computeReminders()
-      // Immediate local add
-      try {
-        if (props.contact?.id) {
-          await occurrenceService.addOrIgnore({ contact_id: props.contact.id, scheduled_at: contactData.next_visit_at, reminders })
+      if (mode.value === 'add' || !props.contact?.id) {
+        // Stage locally in Add mode
+        stagedOccurrences.value.push({ scheduled_at: contactData.next_visit_at, reminders })
+      } else {
+        // In edit mode, optimistically add to the list immediately for instant feedback
+        const tempOcc = { 
+          id: 'temp-' + Date.now(), 
+          contact_id: props.contact?.id,
+          scheduled_at: contactData.next_visit_at, 
+          reminders 
         }
-      } catch {}
-      emit('add-occurrence', { next_visit_at: contactData.next_visit_at, reminders })
+        occurrences.value = [...occurrences.value, tempOcc].sort((a, b) => 
+          new Date(a.scheduled_at) - new Date(b.scheduled_at)
+        )
+        
+        // Then save to database
+        try {
+          await occurrenceService.addOrIgnore({ 
+            contact_id: props.contact.id, 
+            scheduled_at: contactData.next_visit_at, 
+            reminders 
+          })
+        } catch {}
+        emit('add-occurrence', { next_visit_at: contactData.next_visit_at, reminders })
+      }
       // Clear date to encourage adding another; keep time to reuse if desired
       formData.next_visit_date = ''
       // Open the date picker automatically for fast multi-select, then time picker
@@ -535,13 +569,39 @@ export default {
     const setCurrentVisit = async () => {
       // Save the currently selected date/time as an occurrence and show it immediately
       const contactData = { ...formData }
-      if (!contactData.next_visit_date || mode.value === 'add') return
+      if (!contactData.next_visit_date) return
       const t = contactData.next_visit_time || '10:00'
       const when = `${contactData.next_visit_date}T${t}`
       const reminders = computeReminders()
-      // Immediate local add
-      try { if (props.contact?.id) await occurrenceService.addOrIgnore({ contact_id: props.contact.id, scheduled_at: when, reminders }) } catch {}
-      emit('add-occurrence', { next_visit_at: when, reminders })
+      
+      if (mode.value === 'add') {
+        // In add mode, stage the occurrence locally
+        stagedOccurrences.value.push({ scheduled_at: when, reminders })
+      } else {
+        // In edit mode, optimistically add to the list immediately for instant feedback
+        const tempOcc = { 
+          id: 'temp-' + Date.now(), 
+          contact_id: props.contact?.id,
+          scheduled_at: when, 
+          reminders 
+        }
+        occurrences.value = [...occurrences.value, tempOcc].sort((a, b) => 
+          new Date(a.scheduled_at) - new Date(b.scheduled_at)
+        )
+        
+        // Then save to database
+        try { 
+          if (props.contact?.id) {
+            await occurrenceService.addOrIgnore({ 
+              contact_id: props.contact.id, 
+              scheduled_at: when, 
+              reminders 
+            })
+          }
+        } catch {}
+        emit('add-occurrence', { next_visit_at: when, reminders })
+      }
+      
       // Clear the form to provide feedback that it worked
       formData.next_visit_date = ''
       formData.next_visit_time = ''
@@ -643,7 +703,9 @@ export default {
       reminderLabel,
       showReminderMenu,
       occurrences,
+        stagedOccurrences,
         removeOccurrence,
+        removeStaged: (idx) => { stagedOccurrences.value.splice(idx, 1) },
         formatOccurrence,
         handleOverlayClick,
         onTimeFocus,

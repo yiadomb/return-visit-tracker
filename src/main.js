@@ -27,3 +27,12 @@ try {
     })
   }
 } catch {}
+
+// One-time backfill trigger: push everything once soon after app start
+try {
+  if (syncService.isReady()) {
+    setTimeout(() => {
+      syncService.pushAll().catch(() => {})
+    }, 1200)
+  }
+} catch {}

@@ -1,6 +1,15 @@
 <template>
-  <div v-show="open" class="drawer-overlay" @click.self="$emit('close')">
-    <aside class="drawer" :class="{ open }" @touchstart="onTouchStart" @touchmove="onTouchMove" @touchend="onTouchEnd">
+  <div v-show="showOverlay" :class="['drawer-overlay', { visible: isOpen || isDragging }]" @click.self="$emit('close')">
+    <aside
+      ref="drawerEl"
+      class="drawer"
+      :class="{ open: isOpen, dragging: isDragging }"
+      :style="{ '--drag-offset': dragPercent + '%' }"
+      @touchstart="onTouchStart"
+      @touchmove="onTouchMove"
+      @touchend="onTouchEnd"
+      @transitionend="onTransitionEnd"
+    >
       <header class="drawer-header">
         <h3>Menu</h3>
       </header>
@@ -90,6 +99,16 @@ export default {
   },
   emits: ['close','open-report'],
   setup(props, { emit }) {
+    const showOverlay = ref(false)
+    const isOpen = ref(false)
+    const isDragging = ref(false)
+    const dragPercent = ref(0) // 0 to 100 (rightward when on right side)
+    const drawerEl = ref(null)
+    let drawerWidth = 0
+
+    const measure = () => {
+      drawerWidth = drawerEl.value ? drawerEl.value.offsetWidth : Math.min(window.innerWidth * 0.86, 320)
+    }
     const now = new Date()
     const currentMonth = ref(now.getMonth())
     const currentYear = ref(now.getFullYear())
@@ -129,13 +148,13 @@ export default {
       entries.value = await reportEntryService.getEntries(currentYear.value, currentMonth.value)
     }
 
-    // Swipe-to-close (swipe right)
+    // Drag-to-close (right-to-left)
     let startX = 0
     let startY = 0
     let startTime = 0
-    let isDragging = false
     
     const onTouchStart = (e) => {
+      if (!isOpen.value) return
       // Don't interfere with interactive elements
       const target = e.target
       if (target && (target.tagName === 'BUTTON' || target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.closest('button, input, select'))) {
@@ -148,57 +167,80 @@ export default {
       startX = t.clientX
       startY = t.clientY
       startTime = Date.now()
-      isDragging = false
+      isDragging.value = false
+      dragPercent.value = 0
     }
     
     const onTouchMove = (e) => {
       if (!startX) return
-      
       const t = e.touches && e.touches[0]
       if (!t) return
-      
       const dx = t.clientX - startX
       const dy = t.clientY - startY
-      
-      // Only consider it a drag if we've moved significantly
-      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
-        isDragging = true
-        
-        // If swiping horizontally (left or right), prevent other touch behaviors
-        if (Math.abs(dx) > 20 && Math.abs(dx) > Math.abs(dy)) {
-          e.preventDefault()
+      // Initiate dragging when clearly horizontal
+      if (!isDragging.value) {
+        if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+          isDragging.value = Math.abs(dx) > Math.abs(dy)
         }
       }
+      if (!isDragging.value) return
+      measure()
+      // Only allow rightward movement (positive dx) when on right side
+      const clampedDx = Math.max(0, dx)
+      const pct = Math.min(100, (clampedDx / (drawerWidth || 1)) * 100)
+      dragPercent.value = pct
+      // Prevent scrolling while horizontally dragging
+      e.preventDefault()
     }
     
     const onTouchEnd = (e) => {
-      if (!startX || !isDragging) {
+      if (!startX || !isDragging.value) {
         startX = 0
         return
       }
-      
       const t = e.changedTouches && e.changedTouches[0]
       if (!t) return
-      
       const dx = t.clientX - startX
       const dy = t.clientY - startY
       const duration = Date.now() - startTime
-      
-      // Close if: swiping left or right, more horizontal than vertical, minimum distance, reasonable speed
-      if (Math.abs(dx) > 80 && Math.abs(dx) > Math.abs(dy) * 1.5 && duration < 500) {
+      measure()
+      const distance = Math.abs(dx)
+      const velocity = distance / Math.max(1, duration) // px per ms
+      const shouldClose = (dx > 0 && distance > (drawerWidth * 0.25)) || (dx > 0 && velocity > 0.5 && Math.abs(dx) > Math.abs(dy))
+      // End dragging to re-enable CSS transitions
+      isDragging.value = false
+      if (shouldClose) {
+        // Move to closed: drop drag offset then toggle internal open, letting transition animate to -100%
+        dragPercent.value = 0
+        isOpen.value = false
+        // Notify parent to sync state
         emit('close')
+      } else {
+        // Snap back to fully open
+        dragPercent.value = 0
       }
-      
       startX = 0
-      isDragging = false
     }
 
-    // Refresh when drawer opens
+    const onTransitionEnd = (e) => {
+      if (e.propertyName !== 'transform') return
+      if (!isOpen.value && !isDragging.value) {
+        showOverlay.value = false
+        dragPercent.value = 0
+      }
+    }
+
+    // Sync external open prop with internal animated state
     watch(() => props.open, async (newVal) => {
       if (newVal) {
+        showOverlay.value = true
+        // allow overlay to render first
+        requestAnimationFrame(() => { isOpen.value = true })
         await onReportUpdated()
-        // Trigger refresh for archived contacts count
         window.dispatchEvent(new CustomEvent('rv:refresh'))
+      } else {
+        // start closing animation; overlay will be hidden on transitionend
+        isOpen.value = false
       }
     })
     
@@ -244,10 +286,14 @@ export default {
     }
 
     onMounted(async () => { 
+      measure()
+      showOverlay.value = props.open
+      isOpen.value = props.open
       await onReportUpdated(); 
       try { window.addEventListener('rv:report:updated', onReportUpdated) } catch {}
+      try { window.addEventListener('resize', measure) } catch {}
     })
-    onBeforeUnmount(() => { try { window.removeEventListener('rv:report:updated', onReportUpdated) } catch {} })
+    onBeforeUnmount(() => { try { window.removeEventListener('rv:report:updated', onReportUpdated) } catch {} try { window.removeEventListener('resize', measure) } catch {} })
     const onReportUpdated = async () => { await loadCurrentMonthTotals(); await loadGoals(); await loadEntries(); }
 
     const openDetails = async () => { await loadEntries(); detailsOpen.value = true }
@@ -293,13 +339,15 @@ export default {
     }
 
     return { 
-      monthLabel, onTouchStart, onTouchMove, onTouchEnd,
+      monthLabel, onTouchStart, onTouchMove, onTouchEnd, onTransitionEnd,
       totalMinutes, totalStudies, hoursGoal, studiesGoal, hoursPct, studiesPct, formatHM, onReportUpdated, getProgressPercent, getProgressText,
       formatServiceYearSummary, hoursBarGradient, studiesBarGradient,
       // New interactions
       detailsOpen, entryOpen, editingEntry, entries, openDetails, openEntry, onEditEntry, onDeleteEntry, onSendReport,
       currentYear, currentMonth, prevMonth, nextMonth, noop,
-      serviceYearOpen, serviceYearStart, openServiceYear
+      serviceYearOpen, serviceYearStart, openServiceYear,
+      // Drawer animation state
+      showOverlay, isOpen, isDragging, dragPercent, drawerEl
     }
   }
 }
@@ -311,19 +359,27 @@ export default {
   inset: 0;
   background: rgba(0,0,0,0.25);
   z-index: 3000;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
 }
+.drawer-overlay.visible { opacity: 1; pointer-events: auto; }
 .drawer {
   position: absolute;
-  top: 0; left: 0; bottom: 0;
+  top: 0; right: 0; left: auto; bottom: 0;
   width: min(86vw, 320px);
   background: #fff;
-  box-shadow: 2px 0 16px rgba(0,0,0,0.15);
-  transform: translateX(-100%);
+  box-shadow: -2px 0 16px rgba(0,0,0,0.15);
+  /* Base from left, allow extra offset via CSS var for dragging */
+  --drag-offset: 0%;
+  --drawer-open-offset: 100%;
+  transform: translateX(calc(var(--drawer-open-offset) + var(--drag-offset)));
   transition: transform 0.25s ease;
   display: flex;
   flex-direction: column;
 }
-.drawer.open { transform: translateX(0); }
+.drawer.open { --drawer-open-offset: 0%; }
+.drawer.dragging { transition: none; touch-action: pan-y; }
 .drawer-header { display: flex; align-items: center; justify-content: center; padding: 0.9rem 0.9rem; border-bottom: 1px solid var(--border-color); background: var(--header-background-color); color: #fff; }
 .drawer-nav { display: flex; flex-direction: column; padding: 0.5rem; gap: 0.25rem; }
 

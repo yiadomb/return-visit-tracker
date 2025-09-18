@@ -41,3 +41,9 @@ android/local.properties
 
 # Capacitor
 android/app/src/main/assets/public 
+
+# Android signing keys (do not commit)
+android/*.keystore
+**/*.keystore
+android/keystore.properties
+**/keystore.properties

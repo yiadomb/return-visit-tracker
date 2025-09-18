@@ -91,15 +91,15 @@ export default {
         window.dispatchEvent(new CustomEvent('rv:refresh'))
       }
     },
-    // Edge-swipe to open drawer on phones only
+    // Edge-swipe to open drawer on phones only (from right edge)
     onEdgeTouchStart(e) {
       const w = window.innerWidth
       const isPhone = w <= 600
       if (!isPhone) return
       const t = e.touches && e.touches[0]
       if (!t) return
-      // Only if starting near the very left edge
-      if (t.clientX <= 16) {
+      // Only if starting near the very right edge
+      if (t.clientX >= w - 16) {
         this._edgeStartX = t.clientX
         this._edgeStartY = t.clientY
       } else {
@@ -115,7 +115,8 @@ export default {
       const dy = Math.abs(t.clientY - this._edgeStartY)
       this._edgeStartX = 0
       this._edgeStartY = 0
-      if (dx > 60 && dx > dy) {
+      // Swipe left from right edge
+      if (dx < -60 && Math.abs(dx) > dy) {
         this.drawerOpen = true
       }
     },

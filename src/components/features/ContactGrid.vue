@@ -34,51 +34,32 @@
         </div>
         </div>
       </div>
-      <!-- Chips (Days) shown only on phones) -->
-      <div v-if="isMobile" class="chips-collapsible">
-        <div class="chips-header">
-          <button class="chips-toggle" @click="chipsExpanded = !chipsExpanded" :aria-expanded="chipsExpanded">
-            <span>Days</span>
-            <span class="chev" :class="{ open: chipsExpanded }">▾</span>
-          </button>
-          <button class="calendar-btn" @click="openCalendar" title="Open calendar">
-            <span class="cal-label">{{ currentCalendarLabel }}</span>
-          </button>
-          <input 
-            type="date" 
-            ref="hiddenDateInput" 
-            @change="handleCalendarDate"
-            style="position: absolute; left: -9999px; opacity: 0; pointer-events: none;"
-          />
-        </div>
-        <div v-show="chipsExpanded" class="mobile-day-chips toolbar-chips">
-          <div class="chips-row">
+      <!-- Header day popover (opened by tapping a header) -->
+      <div v-if="dayMenu.visible" class="day-popover-overlay" @click="closeDayMenu">
+        <div class="day-popover" :style="{ top: dayMenu.y + 'px', left: dayMenu.x + 'px' }" @click.stop>
+          <div class="chips-row day-popover-row">
       <button 
-              v-for="bucket in chipRow1"
-              :key="bucket"
+              v-for="b in chipRow1"
+              :key="b"
               class="chip"
-              :class="{ active: selectedBucket === bucket }"
-              @click="selectMobileDay(bucket)"
+              :class="{ active: selectedBucket === b }"
+              @click="selectMobileDay(b); closeDayMenu()"
             >
-              {{ getShortDayName(bucket) }}
+              {{ getShortDayName(b) }}
       </button>
         </div>
-          <div class="chips-row">
-      <button 
-              v-for="bucket in chipRow2"
-              :key="bucket"
-              class="chip special"
-              :class="{ active: selectedBucket === bucket }"
-              @click="selectMobileDay(bucket)"
-            >
-              {{ getSpecialLabel(bucket) }}
-      </button>
     </div>
         </div>
-      </div>
+      <!-- Hidden date control for header calendar -->
+      <input 
+        type="date" 
+        ref="hiddenDateInput" 
+        @change="handleCalendarDate"
+        style="position: absolute; left: -9999px; opacity: 0; pointer-events: none;"
+      />
       <!-- Service year indicator removed per request -->
 
-      <div class="contacts-scroll">
+      <div class="contacts-scroll" ref="columnsScrollRef">
       <div v-if="!isMobile" class="bucket-columns" ref="columnsContainer">
         <div 
           v-for="bucket in BUCKETS" 
@@ -92,7 +73,16 @@
           :class="{ 'drag-over': dragOverBucket === bucket }"
         >
           <div class="bucket-header">
-            <h3>{{ bucket }}</h3>
+            <h3 class="bucket-title" @click.stop="openDayMenu($event)">{{ bucket }}</h3>
+            <button 
+              v-if="bucket !== 'Others'"
+              class="header-calendar-btn" 
+              :class="getCalendarClassFor(bucket)"
+              @click.stop="openCalendar" 
+              :title="'Jump to ' + bucket"
+            >
+              {{ getCalendarLabelFor(bucket) }}
+            </button>
             <span class="contact-count">({{ getBucketContacts(bucket).length }})</span>
             
             <!-- Sort controls -->
@@ -106,7 +96,7 @@
               >
                 <span class="sort-field-icon">
                   {{ getBucketSort(bucket).field === 'date' ? '📅' : 
-                     getBucketSort(bucket).field === 'hostel' ? '🏠' : '⋮' }}
+                     getBucketSort(bucket).field === 'hostel' ? '🏠' : '▾' }}
                 </span>
               </button>
               
@@ -243,7 +233,16 @@
             class="mobile-bucket-column"
           >
             <div class="mobile-bucket-header">
-              <h3>{{ bucket }}</h3>
+              <h3 class="bucket-title" @click.stop="openDayMenu($event)">{{ bucket }}</h3>
+              <button 
+                v-if="bucket !== 'Others'"
+                class="header-calendar-btn" 
+                :class="getCalendarClassFor(bucket)"
+                @click.stop="openCalendar" 
+                :title="'Jump to ' + bucket"
+              >
+                {{ getCalendarLabelFor(bucket) }}
+              </button>
               <span class="mobile-contact-count">({{ getBucketContacts(bucket).length }})</span>
               
               <!-- Mobile Sort controls -->
@@ -257,7 +256,7 @@
                 >
                   <span class="sort-field-icon">
                     {{ getBucketSort(bucket).field === 'date' ? '📅' : 
-                       getBucketSort(bucket).field === 'hostel' ? '🏠' : '⋮' }}
+                       getBucketSort(bucket).field === 'hostel' ? '🏠' : '▾' }}
                   </span>
                 </button>
                 
@@ -404,16 +403,13 @@
         <div class="chips-row">
           <button v-for="b in chipRow1" :key="b" class="chip" @click="handleMoveDayFromSheet(b)">{{ getShortDayName(b) }}</button>
         </div>
-        <div class="chips-row" style="margin-top: 0.25rem;">
-          <button v-for="b in chipRow2" :key="b" class="chip" @click="handleMoveDayFromSheet(b)">{{ getSpecialLabel(b) }}</button>
-        </div>
       </div>
     </div>
   </div>
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useContacts } from '../../composables/useDb.js'
 import { db, occurrenceService } from '../../services/db.js'
 import { liveQuery } from 'dexie'
@@ -437,10 +433,20 @@ export default {
     const isTouchDevice = ref(false)
     const selectedBucket = ref('')
     const columnsContainer = ref(null)
+    const columnsScrollRef = ref(null)
     const chipsExpanded = ref(false)
     const hiddenDateInput = ref(null)
-    const chipRow1 = computed(() => ['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday'])
-    const chipRow2 = computed(() => ['Flexible','NotAtHomes','Others'])
+    const dayMenu = ref({ visible: false, x: 0, y: 0 })
+    const openDayMenu = (event) => {
+      // Position near the tapped/clicked header text
+      const rect = event.currentTarget.getBoundingClientRect()
+      const x = Math.max(8, rect.left + rect.width / 2 - 160)
+      const y = rect.bottom + 8
+      dayMenu.value = { visible: true, x, y }
+    }
+    const closeDayMenu = () => { dayMenu.value = { ...dayMenu.value, visible: false } }
+    const chipRow1 = computed(() => ['Saturday','Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Others'])
+    const chipRow2 = computed(() => [])
     const selectMobileDay = (bucket) => {
       selectedBucket.value = bucket
       // Align carousel or scroll desktop columns accordingly
@@ -463,9 +469,24 @@ export default {
     const isTransitioning = ref(false)
     const maxStartIndex = computed(() => BUCKETS.length - (isMobile.value ? 1 : 2))
 
-    const syncSelectedToIndex = () => {
+    const syncSelectedToIndex = async () => {
       const idx = Math.min(Math.max(carouselIndex.value, 0), BUCKETS.length - 1)
       selectedBucket.value = BUCKETS[idx]
+
+      // On tablet/desktop (grid view), scroll horizontally to the selected bucket
+      if (!isMobile.value && columnsContainer.value) {
+        await nextTick()
+        try {
+          const bucket = selectedBucket.value
+          const container = columnsContainer.value
+          const el = container.querySelector(`[data-bucket="${bucket}"]`)
+          if (el) {
+            const scroll = columnsScrollRef.value || container
+            const targetLeft = el.offsetLeft - 4
+            scroll.scrollTo({ left: targetLeft, behavior: 'auto' })
+          }
+        } catch {}
+      }
     }
     
     // Dynamic calendar label (mobile only): shows date for the current bucket within the current/next week
@@ -491,6 +512,46 @@ export default {
       const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sept','Oct','Nov','Dec']
       return `${months[base.getMonth()]} ${base.getDate()}`
     })
+    const getCalendarLabelFor = (bucket) => {
+      const dayIndex = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].indexOf(bucket)
+      if (dayIndex < 0) return '📅'
+      const now = new Date()
+      const todayIndex = now.getDay()
+      const startOfWeek = new Date(now)
+      startOfWeek.setHours(0,0,0,0)
+      startOfWeek.setDate(startOfWeek.getDate() - todayIndex)
+      const base = new Date(startOfWeek)
+      let offset = dayIndex
+      if (dayIndex < todayIndex) offset += 7
+      base.setDate(startOfWeek.getDate() + offset)
+      const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sept','Oct','Nov','Dec']
+      return `${months[base.getMonth()]} ${base.getDate()}`
+    }
+
+    const getCalendarClassFor = (bucket) => {
+      const dayIndex = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].indexOf(bucket)
+      if (dayIndex < 0) return ''
+      const now = new Date()
+      const todayIndex = now.getDay()
+      const startOfWeek = new Date(now)
+      startOfWeek.setHours(0,0,0,0)
+      startOfWeek.setDate(startOfWeek.getDate() - todayIndex)
+      const thisWeekEnd = new Date(startOfWeek)
+      thisWeekEnd.setDate(startOfWeek.getDate() + 6)
+
+      // Date for this bucket within current/next week
+      const target = new Date(startOfWeek)
+      let offset = dayIndex
+      if (dayIndex < todayIndex) offset += 7
+      target.setDate(startOfWeek.getDate() + offset)
+
+      // Treat Friday as index 5; ensure mapping is consistent
+      const isToday = dayIndex === todayIndex
+      if (isToday) return 'cal--today'
+      const isNextWeek = target > thisWeekEnd
+      if (isNextWeek) return 'cal--next'
+      return ''
+    }
     
     // Touch/swipe state
     const touchStartX = ref(0)
@@ -972,7 +1033,38 @@ export default {
     const handleMoveDayFromSheet = async (bucket) => {
       if (!pendingMoveContact.value) return
       try {
-        await updateContact(pendingMoveContact.value.id, { bucket })
+        const source = pendingMoveContact.value
+        const now = new Date()
+        if (source.__mirrored && source.__displayed_at) {
+          const targetDayIndex = {
+            'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3, 'Thursday': 4, 'Friday': 5, 'Saturday': 6
+          }[bucket]
+          if (targetDayIndex == null) {
+            // Fallback: if not a weekday bucket, move the base contact bucket
+            await updateContact(source.id, { bucket })
+          } else {
+            // Compute new datetime: nearest future date of target weekday, preserving the time from the occurrence
+            const src = new Date(source.__displayed_at)
+            const time = { h: src.getHours(), m: src.getMinutes() }
+            const candidate = new Date(now)
+            candidate.setHours(time.h, time.m, 0, 0)
+            while (candidate.getDay() !== targetDayIndex || candidate <= now) {
+              candidate.setDate(candidate.getDate() + 1)
+            }
+            // Find the exact occurrence by contact_id + scheduled_at and update
+            const occs = occurrences.value.filter(o => o.contact_id === source.id)
+            const targetMs = new Date(source.__displayed_at).getTime()
+            const match = occs.find(o => new Date(o.scheduled_at).getTime() === targetMs)
+            if (match) {
+              await occurrenceService.update(match.id, { scheduled_at: candidate.toISOString() })
+            } else {
+              throw new Error('Occurrence not found')
+            }
+          }
+        } else {
+          // Original card move: update the contact's bucket
+          await updateContact(source.id, { bucket })
+        }
       } finally {
         closeMoveSheet()
       }
@@ -1133,16 +1225,12 @@ export default {
         'Wednesday': 'Wed',
         'Thursday': 'Thu',
         'Friday': 'Fri',
-        'Flexible': 'Flexible',
-        'Others': 'Others',
-        'NotAtHomes': 'NAH'
+        'Others': 'Others'
       }
       return shortNames[bucket] || bucket
     }
 
     const getSpecialLabel = (bucket) => {
-      if (bucket === 'Flexible') return 'Flexible days'
-      if (bucket === 'NotAtHomes') return 'Not at homes'
       if (bucket === 'Others') return 'Others'
       return bucket
     }
@@ -1348,9 +1436,7 @@ export default {
         'Wednesday': { bg: '#ff9800', color: 'white' },     // Orange
         'Thursday': { bg: '#9c27b0', color: 'white' },      // Purple
         'Friday': { bg: '#e91e63', color: 'white' },        // Pink
-        'Flexible': { bg: '#607d8b', color: 'white' },      // Blue Grey
-        'Others': { bg: '#795548', color: 'white' },        // Brown
-        'NotAtHomes': { bg: '#f44336', color: 'white' }     // Red
+        'Others': { bg: '#795548', color: 'white' }         // Brown
       }
       
       const colors = dayColors[bucket] || { bg: '#3498db', color: 'white' }
@@ -1372,6 +1458,8 @@ export default {
         const idx = BUCKETS.indexOf(todayBucket)
         if (idx >= 0) {
           carouselIndex.value = Math.min(Math.max(idx, 0), Math.max(BUCKETS.length - 1, 0))
+          // Ensure selectedBucket is set before attempting desktop scroll
+          selectedBucket.value = BUCKETS[carouselIndex.value]
           syncSelectedToIndex()
         }
       } catch {}
@@ -1654,6 +1742,7 @@ export default {
         carouselIndex,
         carouselContainer,
         columnsContainer,
+        columnsScrollRef,
         chipsExpanded,
         isTransitioning,
         getVisibleBuckets,
@@ -1696,12 +1785,20 @@ export default {
         selectDay,
         getShortDayName,
         getSpecialLabel,
+        chipRow1,
+        chipRow2,
+        selectMobileDay,
         
         // Calendar
         hiddenDateInput,
         openCalendar,
         handleCalendarDate,
         currentCalendarLabel,
+        getCalendarLabelFor,
+        getCalendarClassFor,
+        dayMenu,
+        openDayMenu,
+        closeDayMenu,
         
         handleSaveContact,
         handleDeleteContact,
@@ -1800,7 +1897,7 @@ export default {
 }
 
 .mobile-day-chips { padding: 0.35rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; }
-.chips-row { display: flex; gap: 0.25rem; flex-wrap: wrap; justify-content: center; }
+.chips-row { display: flex; gap: 0.25rem; flex-wrap: nowrap; justify-content: center; overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .chip {
   padding: 0.22rem 0.5rem;
   border: 1px solid var(--border-color);
@@ -1818,62 +1915,7 @@ export default {
 }
 .chip.special.active { background: #3498db; color: #fff; border-color: #3498db; }
 
-.chips-collapsible { 
-  padding: 0 0.75rem; 
-  overflow: hidden; /* Don't let expanded content push layout */
-}
-.chips-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin: 0.25rem 0 0.1rem 0;
-}
-
-.chips-toggle {
-  padding: 0.25rem 0.5rem;
-  border: 1px solid var(--border-color);
-  background: #e8f5e8;
-  color: var(--text-color);
-  border-radius: 6px;
-  cursor: pointer;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.15rem;
-  height: 28px;
-}
-
-.calendar-btn {
-  padding: 0.05rem 0.4rem; /* match filter button */
-  border: 1px solid var(--border-color);
-  background: #e8f5e8;
-  color: var(--text-color);
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 28px; /* match filter button */
-  min-width: 64px; /* match filter button */
-  flex: 0 0 auto;
-}
-
-.calendar-btn .cal-label {
-  font-weight: normal;
-  letter-spacing: 0.2px;
-}
-
-.calendar-btn:hover,
-.calendar-btn:active,
-.calendar-btn:focus {
-  background: #e8f5e8;
-  color: var(--text-color);
-  border-color: var(--border-color);
-  outline: none;
-}
-.chips-toggle .chev { display: inline-block; transition: transform 0.2s ease; margin-left: 0.15rem; }
-.chips-toggle .chev.open { transform: rotate(180deg); }
+/* removed days toggler CSS */
 
 /* Extra-tight chips on small phones */
 @media (max-width: 420px) {
@@ -2014,11 +2056,24 @@ export default {
   font-size: 1rem;
   font-weight: 600;
 }
-
-.mobile-contact-count {
-  font-size: 0.9rem;
-  opacity: 0.9;
+.header-calendar-btn {
+  border: 1px solid rgba(255,255,255,0.5);
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.75rem;
 }
+.header-calendar-btn.cal--today {
+  background: #11e70a; /* green */
+  border-color: #01c553;
+}
+.header-calendar-btn.cal--next {
+  background: #1565c0; /* blue */
+  border-color: #1565c0;
+}
+
+.mobile-contact-count { font-size: 0.9rem; opacity: 0.9; }
 
 .mobile-contacts-in-bucket {
   flex: 1;
@@ -2037,12 +2092,12 @@ export default {
   flex: 1;
   overflow: hidden; /* prevent whole content from scrolling */
   display: grid;
-  grid-template-rows: auto auto 1fr; /* controls, (mobile) days, contacts viewport */
+  grid-template-rows: auto 1fr; /* controls, contacts viewport */
   height: 100%;
   min-height: 0;
 }
 .contacts-scroll {
-  grid-row: 3; /* Explicitly place in the third row */
+  grid-row: 2; /* Explicitly place in the second row */
   min-height: 0; /* allow child to size for overflow */
   overflow-x: auto; /* allow horizontal scroll of columns */
   overflow-y: hidden; /* prevent vertical scroll; buckets will scroll */
@@ -2242,6 +2297,28 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 .add-icon-btn { border: 1px solid rgba(255,255,255,0.6); background: rgba(255,255,255,0.15); color: #fff; padding: 0.1rem 0.35rem; border-radius: 6px; font-weight: 700; }
 .add-icon-btn:hover { background: rgba(255,255,255,0.3); }
 
+.day-popover-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+}
+.day-popover {
+  position: absolute;
+  background: var(--background-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: 0 10px 20px rgba(0,0,0,0.15);
+  padding: 0.25rem 0.35rem;
+}
+
+.day-popover-row {
+  gap: 0.2rem;
+}
+.day-popover .chip {
+  padding: 0.16rem 0.42rem;
+  font-size: 0.78rem;
+}
+
 /* Sort controls styles */
 .sort-controls {
   position: relative;
@@ -2355,19 +2432,22 @@ mark { background: #ffeb3b66; padding: 0 2px; border-radius: 2px; }
 .mobile-sort-field-btn {
   padding: 0.25rem 0.4rem;
   font-size: 0.8rem;
-  min-width: 28px;
-  height: 28px;
 }
 
 .mobile-direction-controls .sort-direction-btn {
-  padding: 0.2rem 0.3rem;
   min-width: 22px;
   height: 22px;
-  font-size: 0.8rem;
 }
 
 .mobile-sort-menu {
   min-width: 160px;
+}
+
+/* Tablet/Desktop header spacing to match mobile clarity */
+@media (min-width: 769px) {
+  .bucket-header { gap: 0.5rem; }
+  .bucket-header .sort-controls { margin-left: 0.25rem; }
+  .bucket-header .add-icon-btn { margin-left: 0.25rem; }
 }
 
 .bucket-header h3 {

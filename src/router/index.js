@@ -3,6 +3,7 @@ import HomeView from '../views/HomeView.vue'
 import AgendaView from '../views/AgendaView.vue'
 import LoginView from '../views/LoginView.vue'
 import SettingsView from '../views/SettingsView.vue'
+import AuthCallbackView from '../views/AuthCallbackView.vue'
 
 const routes = [
   {
@@ -32,6 +33,12 @@ const routes = [
     name: 'Settings',
     component: SettingsView,
     meta: { title: 'Settings' }
+  },
+  {
+    path: '/auth/callback',
+    name: 'AuthCallback',
+    component: AuthCallbackView,
+    meta: { title: 'Signing in...' }
   }
 ]
 

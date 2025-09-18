@@ -130,14 +130,28 @@ class ReturnVisitDatabase extends Dexie {
       contacts: '++id, remote_uuid, name, phone, bucket, next_visit_at, hostel_name, location_detail, last_outcome, notes, tags, display_order, updated_at, archived, bucket_time',
       backupMeta: '++id, last_synced_at, remote_id',
       monthlyReports: '++id, remote_uuid, year, month, total_minutes, studies_count, updated_at',
-      reportEntries: '++id, year, month, entry_date, minutes, studies, is_carryover, updated_at',
-      monthlyGoals: '++id, year, month, minutes_goal, studies_goal, updated_at',
-      agendaNotes: '++id, pinned, created_at, updated_at',
+      reportEntries: '++id, remote_uuid, year, month, entry_date, minutes, studies, is_carryover, updated_at',
+      monthlyGoals: '++id, remote_uuid, year, month, minutes_goal, studies_goal, updated_at',
+      agendaNotes: '++id, remote_uuid, pinned, created_at, updated_at',
       visitOccurrences: '++id, remote_uuid, contact_id, scheduled_at, status, updated_at, contact_remote_uuid, reminders'
     }).upgrade(async tx => {
       // No data migration required. Initialize bucket_time to empty string.
       const contacts = await tx.table('contacts').toArray()
       await Promise.all(contacts.map(c => tx.table('contacts').update(c.id, { bucket_time: c.bucket_time || '' })))
+      // Initialize remote_uuid on newly indexed tables where missing
+      try {
+        const ensureRemoteUuid = async (table) => {
+          const arr = await tx.table(table).toArray()
+          for (const row of arr) {
+            if (row.remote_uuid === undefined) {
+              await tx.table(table).update(row.id, { remote_uuid: null })
+            }
+          }
+        }
+        await ensureRemoteUuid('reportEntries')
+        await ensureRemoteUuid('monthlyGoals')
+        await ensureRemoteUuid('agendaNotes')
+      } catch {}
     })
 
     // Define the Contact table
@@ -415,6 +429,7 @@ export const reportService = {
   async updateMonthlyAggregate(year, month) {
     const { minutes, studies } = await this.getMonthlyTotals(year, month)
     await this.saveReport({ year, month, total_minutes: minutes, studies_count: studies })
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
     return { minutes, studies }
   },
 
@@ -475,6 +490,7 @@ export const reportService = {
       await db.monthlyReports.get(id)
     }
 
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
     return { reported_minutes: reportedMinutes, minutes_sum: minutes, studies_sum: studies, carryover_applied: carryoverApplied }
   }
 }
@@ -502,6 +518,7 @@ export const reportEntryService = {
     })
     await reportService.updateMonthlyAggregate(year, month)
     try { window.dispatchEvent(new CustomEvent('rv:report:updated')) } catch {}
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
     return await db.reportEntries.get(id)
   },
 
@@ -517,6 +534,7 @@ export const reportEntryService = {
     await db.reportEntries.update(id, safe)
     await reportService.updateMonthlyAggregate(entry.year, entry.month)
     try { window.dispatchEvent(new CustomEvent('rv:report:updated')) } catch {}
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
     return await db.reportEntries.get(id)
   },
 
@@ -526,6 +544,7 @@ export const reportEntryService = {
     await db.reportEntries.delete(id)
     await reportService.updateMonthlyAggregate(entry.year, entry.month)
     try { window.dispatchEvent(new CustomEvent('rv:report:updated')) } catch {}
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
     return true
   }
 }
@@ -560,6 +579,7 @@ export const monthlyGoalService = {
       const g = await db.monthlyGoals.get(existing.id)
       try { window.dispatchEvent(new CustomEvent('rv:report:updated')) } catch {}
       try { window.dispatchEvent(new CustomEvent('rv:goals:updated')) } catch {}
+      try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
       return g
     } else {
       const id = await db.monthlyGoals.add({
@@ -572,6 +592,7 @@ export const monthlyGoalService = {
       const g = await db.monthlyGoals.get(id)
       try { window.dispatchEvent(new CustomEvent('rv:report:updated')) } catch {}
       try { window.dispatchEvent(new CustomEvent('rv:goals:updated')) } catch {}
+      try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
       return g
     }
   }
@@ -585,22 +606,34 @@ export const notesService = {
     return arr.sort((a, b) => (b.pinned === true) - (a.pinned === true) || new Date(b.updated_at || 0) - new Date(a.updated_at || 0))
   },
 
-  async create({ html = '', pinned = false } = {}) {
+  async create({ html = '', title = '', pinned = false } = {}) {
     const now = new Date().toISOString()
-    const id = await db.agendaNotes.add({ html: String(html || ''), pinned: !!pinned, created_at: now, updated_at: now })
-    return await db.agendaNotes.get(id)
+    const id = await db.agendaNotes.add({ 
+      html: String(html || ''), 
+      title: String(title || ''),
+      pinned: !!pinned, 
+      created_at: now, 
+      updated_at: now 
+    })
+    const note = await db.agendaNotes.get(id)
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
+    return note
   },
 
-  async update(id, { html, pinned }) {
+  async update(id, { html, title, pinned }) {
     const changes = { updated_at: new Date().toISOString() }
     if (html != null) changes.html = String(html)
+    if (title != null) changes.title = String(title)
     if (pinned != null) changes.pinned = !!pinned
     await db.agendaNotes.update(id, changes)
-    return await db.agendaNotes.get(id)
+    const note = await db.agendaNotes.get(id)
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
+    return note
   },
 
   async remove(id) {
     await db.agendaNotes.delete(id)
+    try { window.dispatchEvent(new CustomEvent('rv:sync:request')) } catch {}
     return true
   }
 }
@@ -647,8 +680,6 @@ export const BUCKETS = [
   'Wednesday',
   'Thursday',
   'Friday',
-  'Flexible',
-  'NotAtHomes',
   'Others'
 ]
 

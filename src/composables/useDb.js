@@ -52,13 +52,27 @@ export function useContacts() {
           })
         } catch (e) { console.warn('Failed to create initial occurrence', e) }
       }
-      // Trigger cloud sync (non-blocking)
-      syncService.syncAll().catch(err => console.warn('Sync after add failed:', err))
-      
+      // Create any staged extra occurrences passed from Add form
+      if (Array.isArray(contactData.stagedOccurrences) && contactData.stagedOccurrences.length > 0) {
+        for (const occ of contactData.stagedOccurrences) {
+          try {
+            await occurrenceService.addOrIgnore({
+              contact_id: newContact.id,
+              scheduled_at: occ.scheduled_at,
+              reminders: occ.reminders
+            })
+          } catch (e) { console.warn('Failed to create staged occurrence', e) }
+        }
+      }
       // Schedule notification if this contact has a future visit (non-blocking)
       notificationService.onContactUpdated(newContact).catch(notifError => {
         console.warn('Notification scheduling failed, but contact creation succeeded:', notifError)
       })
+      
+      // Trigger cloud sync after a delay to avoid blocking UI (non-blocking)
+      setTimeout(() => {
+        syncService.syncAll().catch(err => console.warn('Sync after add failed:', err))
+      }, 500)
       
       return newContact
     } catch (err) {
@@ -85,8 +99,10 @@ export function useContacts() {
       }
       const updatedContact = await contactService.update(id, safeChanges)
       // Occurrences are created via Set/Add buttons; avoid duplicating here
-      // Trigger cloud sync (non-blocking)
-      syncService.syncAll().catch(err => console.warn('Sync after update failed:', err))
+      // Trigger cloud sync after a delay to avoid blocking UI (non-blocking)
+      setTimeout(() => {
+        syncService.syncAll().catch(err => console.warn('Sync after update failed:', err))
+      }, 500)
       if (index !== -1) {
         contacts.value[index] = updatedContact
       }
